@@ -17,16 +17,18 @@ That "something" could be:
 - Data base.
 - File on disk.
 - Another microservice.
-- Vector database. 
+- Vector database.
 - Cloud storage.
 
 Python isn't doing hte work, the remote server is. Python is just waiting.  
 
 ---
 
-### CPU-bound vs I/O bound
+## CPU-bound vs I/O bound
 
-**CPU-bound**: a task is CPU bounded when the processor is actively doing calculations. i.e. Tasks use the processor heavily.
+### CPU-bound
+
+A task is CPU bounded when the processor is actively doing calculations. i.e. Tasks use the processor heavily.
 
 Example:
 
@@ -36,7 +38,9 @@ Example:
 - Video encoding.
 - Large numerical computations.
 
-**I/O bound**: task that spend most of its time waiting for input or output.
+### I/O bound
+
+Task that spend most of its time waiting for input or output.
 
 Example:
 
@@ -54,14 +58,15 @@ The CPU does very little word. Most of the elapsed is waiting.
 
 Async/concurrency is especially valuable when work contains periods where it cannot make progress because it is waiting for something external. I.e it is very valuable with I/O bounded tasks not CPU bounded tasks.
 
-
 **preemption:** An operating system can interrupt a running CPU task and switch to another task.
 
 ---
 
-### Concurrency and parallelism
+## Concurrency and parallelism
 
-**Concurrency:** The ability of a system to make progress on multiple tasks during overlapping periods of time, by switching between tasks when appropriate. example if A waits for the database while B runs, A and B are progressing concurrently.  
+### Concurrency
+
+ The ability of a system to make progress on multiple tasks during overlapping periods of time, by switching between tasks when appropriate. example if A waits for the database while B runs, A and B are progressing concurrently.  
 
 It has 2 types:
 
@@ -91,5 +96,185 @@ Cons:
 - Scheduling becomes more complex
 - Shared state can become harder to reason about because a task can be interrupted at essentially any point.
 
-**Parallelism:** Multiple pieces of work are actually executing simultaneously, typically on different CPU cores.  
+### Parallelism
+
+ Multiple pieces of work are actually executing simultaneously, typically on different CPU cores.  
+
+---
+
+## Processes and threads
+
+### Process
+
+A process is an isolated running instance of a program, with its own memory space and operating-system resources.
+
+The important property is **isolation**.  
+IF your FastAPI process has `x = 10`, and VS Code has `x = 500` they don't share the same `x`.  
+They are separate memory spaces.
+
+THis isolation is extremely useful for stability and security, but it also makes communication between processes more expensive and more complicated.  
+
+### Thread
+
+A thread is a unit of execution inside a process. It executes instructions on the CPU and shares the process's memory and resources with other threads belonging to the same process.
+
+Thread is an execution context managed by the operating system. It is not a task.
+
+Distinction:
+
+``` text
+Process = container + resources + memory
+Thread  = execution path inside that process
+Task    = work that needs to be done
+```
+
+A process can contain multiple threads. The threads belong to the same process and therefore can share much of the process's memory/resources.  
+
+The problem: If thread A and thread B both modify the same piece of data at the same time, you can get race conditions.  
+
+Task: a work that needs to be performed.  
+
+You can have thread of multiple tasks where the thread switches between tasks:
+
+```text
+Thread 1
+   │
+   ├── Task A
+   ├── Task B
+   └── Task C
+```
+
+Layers of the process:
+
+```text
+Process
+   ↓
+Threads
+   ↓
+Tasks
+   ↓
+CPU execution
+```
+
+CPU execute instructions that some execution context has been scheduled to run.  
+> The thread can execute other work, and the CPU executes the instruction of that thread.  
+
+**Cooperative async**  
+One thread manages many tasks and switches between them when a task yields/waits.
+
+Tasks are not threads. Many tasks can live on the same thread.
+
+**One thread per request/task**  
+for every task/request we make it in one thread alone.
+
+Each request has its own OS-manged execution context.
+
+One thread per request is not a rule. It is one possible design, but production systems use a thread pool, where a limited number of threads handle many requests over time.
+
+Why we don't create 1000 threads for 1000 questions?  
+Because threads are'nt free. They consume memory and OS resources, and scheduling thousands of threads introduces overhead.
+
+Mental model:
+
+``` text
+                 Concurrency
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+      Threads              Cooperative
+          │                   async
+          │                     │
+ Multiple execution        One execution
+ contexts                  context
+          │                     │
+          ↓                     ↓
+   OS manages threads     Tasks yield
+                          to each other
+```
+
+No one is universally better that other.  
+
+Threads can be excellent when you have blocking libraries or certain workloads.  
+
+Async is particularly attractive when you have huge numbers of I/O-bound operations and want many light weight tasks sharing a small number of execution threads.  
+
+Thread is an execution context, while task is a unit of work that needs to be executed.
+
+For this ordinary function:
+
+``` text
+process_order()
+
+1. Read order
+2. Query database
+3. Process result
+4. Call payment service
+5. Save result
+6. Return response
+```
+
+If this function executing on a thread, the thread is effectively following that sequence.
+
+Suppose step 2 requires waiting 2 seconds for the database.
+
+In blocking model:
+
+```text
+Thread
+  ↓
+Task: process_order()
+  ↓
+Query DB
+  ↓
+WAIT 2 seconds
+  ↓
+Continue
+```
+
+The thread is stuck inside the task. But in the cooperative async model we want something more like:
+
+```text
+Thread
+  │
+  ├── Task A
+  │      └── DB query → waiting
+  │
+  ├── Task B
+  │      └── HTTP query → waiting
+  │
+  └── Task C
+         └── CPU work
+```
+
+The thread needs t keep track of where each task currently is.
+
+Example:
+
+```text
+Task A:
+"I sent the DB query.
+I'm waiting for its result.
+When it arrives, continue from step 3."
+
+Task B:
+"I sent the HTTP request.
+I'm waiting for the response.
+When it arrives, continue from step 4."
+
+Task C:
+"I'm currently executing step 2."
+```
+
+A cooperative task needs to be pausable and resumable.  
+
+It is not enough to say "Stop A", the system needs to preserve A's execution state so latter can say "Resume A exactly where you left off."
+
+The crucial property is **execution state of the task survives the suspension.**  
+And this is the conceptual reason we eventually need coroutines.
+
+**coroutines**: It is essentially a function-like computation that can suspend its execution and later resume from where it stopped(suspended).
+
+When a task resumes, it doesn't start over. It effectively continues from the suspended point with its previous state intact.
+
+A thread has execution state too. The difference is that a thread is an operating-system execution context, while a coroutine/task is much lighter unit of suspended/resumable work managed by the program/runtime.
 

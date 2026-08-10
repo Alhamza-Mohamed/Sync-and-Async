@@ -278,6 +278,69 @@ When a task resumes, it doesn't start over. It effectively continues from the su
 
 A thread has execution state too. The difference is that a thread is an operating-system execution context, while a coroutine/task is much lighter unit of suspended/resumable work managed by the program/runtime.
 
+### Event loop
+
+The component that is responsible for managing the coroutines.
+
+The relationship is  like:
+
+``` text
+Process
+  │
+  └── Thread
+        │
+        └── Event Loop
+              │
+              ├── Task A
+              ├── Task B
+              ├── Task C
+              └── Task D
+```
+While thread provides the execution context. The event loop is the scheduler that manages the async tasks.
+
+Example
+
+``` text
+Thread
+  │
+  ▼
+Event Loop
+  │
+  ├── A → running
+  │       ↓
+  │     await I/O
+  │       ↓
+  │     suspended
+  │
+  ├── B → ready
+  │       ↓
+  │     run B
+  │
+  └── C → ready
+          ↓
+        run C
+```
+
+So when A reaches an `await` and suspends, the event loop essentially says "A can't make progress right now. what else can I run", then it can run B or C.
+
+Later when A's I/O operation is ready, the event loop knows that A can make progress again and schedules A to resume.
+
+Three-layer model:
+
+``` text
+CPU
+ ↓
+Thread
+ ↓
+Event Loop
+ ↓
+Coroutines / Tasks
+```
+
+The CPU executes instruction.  
+The thread is the execution context running those instructions.  
+The even loop;o manages which async task gets that execution opportunity.  
+
 ## Async in python
 
 ```python
@@ -348,4 +411,6 @@ await coro
 Eventually it may reach another `await`
 
 `async def` does not mean "execute this asynchronously", it means "This function defines a coroutine computation that can be suspended and resumed."
+
+`await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation.
 

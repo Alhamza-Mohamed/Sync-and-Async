@@ -278,3 +278,74 @@ When a task resumes, it doesn't start over. It effectively continues from the su
 
 A thread has execution state too. The difference is that a thread is an operating-system execution context, while a coroutine/task is much lighter unit of suspended/resumable work managed by the program/runtime.
 
+## Async in python
+
+```python
+async def fetch_data():    
+    print ("started")
+```
+
+When writing async function python coroutine function.
+
+```python
+fetch_data()
+```
+
+When calling the function only the python does not execute the body like a normal function call. It creates a coroutine object representing the computation that can be executed/resumed later.
+
+```text
+normal function
+
+call()
+  ↓
+execute immediately
+  ↓
+return result
+```
+
+```text
+coroutine function
+
+call()
+  ↓
+create coroutine object
+  ↓
+nothing in the body executes yet
+  ↓
+someone must schedule/await it
+  ↓
+execution begins
+```
+
+calling an async function creates a coroutine object, it does note execute the coroutine body. The  coroutine must later must be awaited or scheduled for execution.
+
+For example:
+
+``` python
+coro = fetch_data()
+```
+
+At this point, conceptually:
+
+``` text
+Coroutine object
+┌─────────────────────────┐
+│ Code: fetch_data        │
+│ State: not started      │
+│ Local state: ...        │
+│ Resume information: ... │
+└─────────────────────────┘
+```
+
+It exists, but the body hasn't started.
+
+Later, something can say:
+
+``` python
+await coro
+```
+
+Eventually it may reach another `await`
+
+`async def` does not mean "execute this asynchronously", it means "This function defines a coroutine computation that can be suspended and resumed."
+

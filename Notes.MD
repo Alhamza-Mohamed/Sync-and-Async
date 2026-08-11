@@ -471,3 +471,5 @@ Eventually it may reach another `await`
 `async def` does not mean "execute this asynchronously", it means "This function defines a coroutine computation that can be suspended and resumed."
 
 `await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation.
+
+`asyncio.create_task`  Means schedule A, it does not create a thread. It schedules the coroutine as a Task on the event loop.

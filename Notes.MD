@@ -22,8 +22,6 @@ That "something" could be:
 
 Python isn't doing hte work, the remote server is. Python is just waiting.  
 
----
-
 ## CPU-bound vs I/O bound
 
 ### CPU-bound
@@ -59,8 +57,6 @@ The CPU does very little word. Most of the elapsed is waiting.
 Async/concurrency is especially valuable when work contains periods where it cannot make progress because it is waiting for something external. I.e it is very valuable with I/O bounded tasks not CPU bounded tasks.
 
 **preemption:** An operating system can interrupt a running CPU task and switch to another task.
-
----
 
 ## Concurrency and parallelism
 
@@ -99,8 +95,6 @@ Cons:
 ### Parallelism
 
  Multiple pieces of work are actually executing simultaneously, typically on different CPU cores.  
-
----
 
 ## Processes and threads
 
@@ -181,7 +175,7 @@ Mental model:
                      │
           ┌──────────┴──────────┐
           │                     │
-      Threads              Cooperative
+      One Threads           Cooperative
           │                   async
           │                     │
  Multiple execution        One execution
@@ -278,9 +272,17 @@ When a task resumes, it doesn't start over. It effectively continues from the su
 
 A thread has execution state too. The difference is that a thread is an operating-system execution context, while a coroutine/task is much lighter unit of suspended/resumable work managed by the program/runtime.
 
+---
+
 ### Event loop
 
-The component that is responsible for managing the coroutines.
+The component that is responsible for managing the coroutines.  
+
+The event loop is the mechanism that enables cooperative concurrency in async programs. It runs on a thread and manages multiple coroutines/tasks.  
+
+A task runs until it reaches an `await` point where it cannot make progress, then it yields control back to the event loop.  The event loop can then give the execution opportunity to another ready task.
+
+THe scheduling is **cooperative** because the event loop does not forcibly interrupt a running task. The task must reach a point where it yields control,  typically through `await`.
 
 The relationship is  like:
 
@@ -296,6 +298,7 @@ Process
               ├── Task C
               └── Task D
 ```
+
 While thread provides the execution context. The event loop is the scheduler that manages the async tasks.
 
 Example
@@ -306,19 +309,19 @@ Thread
   ▼
 Event Loop
   │
-  ├── A → running
-  │       ↓
-  │     await I/O
-  │       ↓
-  │     suspended
+  ├── Task A → waiting for I/O
+  │              ↓
+  │            suspended
   │
-  ├── B → ready
-  │       ↓
-  │     run B
+  ├── Task B → running
+  │              ↓
+  │            await
+  │              ↓
+  │            yields control
   │
-  └── C → ready
-          ↓
-        run C
+  └── Task C → ready
+                 ↓
+               runs
 ```
 
 So when A reaches an `await` and suspends, the event loop essentially says "A can't make progress right now. what else can I run", then it can run B or C.
@@ -340,6 +343,61 @@ Coroutines / Tasks
 The CPU executes instruction.  
 The thread is the execution context running those instructions.  
 The even loop;o manages which async task gets that execution opportunity.  
+
+**Example on how even loop work:**
+
+``` text
+A → waiting for database
+B → ready to run
+C → waiting for HTTP
+```
+
+The event loop chooses B, B runs and reaches an `await` for another HTTP request. At that exact moment the event loop can run another ready task.  
+The event loop does something like:
+
+``` text
+A → waiting for DB
+B → running
+C → waiting for HTTP
+        ↓
+B reaches await because the awaited operation isn't ready
+        ↓
+B suspends
+        ↓
+Event loop checks what can make progress
+        ↓
+A? ready?
+C? ready?
+other tasks? ready?
+        ↓
+Choose something that can run
+```
+
+The event loop doesn't necessarily necessarily "check A, then C then D ..." by repeatedly asking every task whether it is ready.  
+The underlying I/O system can  notify the event loop about which operations became ready.  
+That is one of the reasons event-driven systems scale well.
+
+**conceptual progression:**
+
+```text
+Thread
+  ↓
+Can execute many tasks cooperatively
+  ↓
+But who manages that cooperation?
+  ↓
+Event Loop
+  ↓
+Schedules the tasks
+  ↓
+Tasks yield at await points
+  ↓
+Event loop runs another ready task
+```
+
+Coroutine: The suspendable computation/function.
+Task: A coroutine that has been scheduled to run by the async runtime/event loop.
+Event loop: the mechanism that manages and schedules those tasks.
 
 ## Async in python
 
@@ -413,4 +471,3 @@ Eventually it may reach another `await`
 `async def` does not mean "execute this asynchronously", it means "This function defines a coroutine computation that can be suspended and resumed."
 
 `await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation.
-

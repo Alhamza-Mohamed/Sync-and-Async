@@ -471,11 +471,11 @@ await coro
 
 Eventually it may reach another `await`
 
-`async def` does not mean "execute this asynchronously", it means "This function defines a coroutine computation that can be suspended and resumed."
+`async def` suspends the current coroutine until the awaited operation can make progress, giving the event loop an opportunity to run other work.
 
 `await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation. i.e. "Suspend this coroutine while this awaitable is incomplete allowing the event loop to run other work"
 
-`asyncio.create_task`  Means schedule A, it does not create a thread. It schedules the coroutine as a Task on the event loop.
+`asyncio.create_task`  Means schedules a coroutine as a task on the event loop. It does not create a thread.
 
 `asyncio.run()` is the entry point that takes the coroutine-based program and gives it an event loop to execute it. It establish the environment in with the async program can run.
 
@@ -529,7 +529,7 @@ In Jupyter, you can often simply do:
 await main()
 ```
 
-Awaitable: something that represents asynchronous work whose resulkt amy not be available yet, and that python know hwo to suspend and later resume around.
+Awaitable: something that represents asynchronous work whose result may not be available yet, and that python know hwo to suspend and later resume around.
 
 Kinds of awaitables:
 
@@ -541,7 +541,7 @@ async def fetch():
   
 coro = fetch() # coro is Coroutine (awaitable) 
 
-result = await coro # result is Coroutine (awaitable)
+result = await coro # The value returned by the coroutine
 ```
 
 2- Task
@@ -565,3 +565,45 @@ Future
    │
    └── result becomes available
 ```
+
+`asyncio.gather()`: It run concurrently, and don't continue until all of them have finished.
+
+Conceptually
+
+```python
+results = await asyncio.gather(
+    A(),
+    B(),
+    C()
+)
+```
+
+```text
+                gather()
+                   │
+       ┌───────────┼───────────┐
+       ↓           ↓           ↓
+      A()         B()         C()
+       │           │           │
+     await       await       await
+       │           │           │
+       └───────────┼───────────┘
+                   ↓
+             all complete
+                   ↓
+               results
+```
+
+`gather` expresses start A, start B, Start C and let them progress concurrently then wait until all of them are complete.  
+It does not control the order in which the task execute. The event  loop does that. `gather` coordinates multiple awaitables concurrently and collects their results in the order the awaitables were provided.
+
+Event loop -> Determines when each task gets to execute/resume.
+`gather()` -> collects the corresponding results then return them in order.
+
+If `gather()` has multiple tasks inside it and one failed it does not automatically cancel the rest.  
+Falling doesn't necessarily mean al the underlying tasks are cancelled.  
+
+By default, `gather()` propagates the first exception it encounters to the caller, but it does not automatically cancel the other awaitables. The other operations may continue running.
+
+With `return_exceptions=True`, exceptions are returned as results instead of being immediately propagated, allowing the caller to handle partial failures.
+

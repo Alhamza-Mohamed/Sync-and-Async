@@ -414,6 +414,9 @@ fetch_data()
 
 When calling the function only the python does not execute the body like a normal function call. It creates a coroutine object representing the computation that can be executed/resumed later.
 
+A coroutine object is not "running asynchronously", it is just an object representing work that can be run.  
+A task is what gives that coroutine an independent scheduled execution lifecycle with in the event loop.
+
 ```text
 normal function
 
@@ -470,6 +473,95 @@ Eventually it may reach another `await`
 
 `async def` does not mean "execute this asynchronously", it means "This function defines a coroutine computation that can be suspended and resumed."
 
-`await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation.
+`await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation. i.e. "Suspend this coroutine while this awaitable is incomplete allowing the event loop to run other work"
 
 `asyncio.create_task`  Means schedule A, it does not create a thread. It schedules the coroutine as a Task on the event loop.
+
+`asyncio.run()` is the entry point that takes the coroutine-based program and gives it an event loop to execute it. It establish the environment in with the async program can run.
+
+It is doing something like:
+
+```text
+Create event loop
+       ↓
+Start event loop
+       ↓
+Run main() coroutine
+       ↓
+main() creates/schedules other tasks
+       ↓
+Event loop manages them
+       ↓
+main() finishes
+       ↓
+Clean up
+       ↓
+Close event loop
+```
+
+If you tried to run `await task_A` in normal ordinary Python script at the top level, python would complain Because there is not already an event loop actively managing your code at that point.
+
+Jupyter notebook however, runs an environment that already has an event loop;o available for interactive execution.  
+So when you write `await task_A` inside Jupyter you already entering an already-running async environment.  
+
+But `asyncio.run(main())` in the same environment with error along lines of:
+
+``` text
+RuntimeError:
+asyncio.run() cannot be called from a running event loop
+```
+
+Because you are essentially trying to create a new event loop inside an already running one.
+
+Normal `.py` app:
+
+``` python
+async def main():
+    ...
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+In Jupyter, you can often simply do:
+
+```python
+await main()
+```
+
+Awaitable: something that represents asynchronous work whose resulkt amy not be available yet, and that python know hwo to suspend and later resume around.
+
+Kinds of awaitables:
+
+1- Coroutine
+
+```python
+async def fetch():
+  ...
+  
+coro = fetch() # coro is Coroutine (awaitable) 
+
+result = await coro # result is Coroutine (awaitable)
+```
+
+2- Task
+
+```python
+task = asyncio.create_task(fetch())
+
+result = await task
+```
+
+3- Future: think of it as an object that representing a result that will become available later.
+
+Conceptually:
+
+``` text
+Future
+   │
+   ├── result not ready yet
+   │
+   │       ... something happens ...
+   │
+   └── result becomes available
+```

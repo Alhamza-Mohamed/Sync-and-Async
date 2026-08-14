@@ -607,7 +607,7 @@ By default, `gather()` propagates the first exception it encounters to the calle
 
 With `return_exceptions=True`, exceptions are returned as results instead of being immediately propagated, allowing the caller to handle partial failures.
 
-`cancel()` it does not end the whole process. It targets specific task and it does not simply kill the coroutine immediately. It marks the task as being cancelled/schedules a cancellation request.
+`task.cancel()` it does not end the whole process. It targets specific task and it and request its cancellation. It does not immediately kill the coroutine. It marks the task as being cancelled/schedules a cancellation request.
 
 Cancellation can be delivered cleanly in suspended task.
 
@@ -616,9 +616,65 @@ task.cancel()
      ↓
 request cancellation
      ↓
-coroutine reaches an await point
+coroutine reaches a suspension point
      ↓
 CancelledError is raised inside the coroutine
      ↓
 coroutine can terminate
+```
+
+> **Coroutine can handle the cancellation or terminate**
+
+Because this is exactly what you are going to discover in your notebook. A coroutine can catch  `CancelledError`, perform cleanup, and potentially even suppress the cancellation.
+
+`gather` with `cancel()`
+
+Suppose having a task that is a gathering of 2 async functions, cancelling the gathered task will cancel both of the functions as the `gather()` operation itself is being cancelled.
+
+```text
+parent Task
+    │
+    │ await gather(...)
+    ↓
+ gather()
+   ├── A
+   └── B
+```
+
+Suppose having 2 function `A()` and `B()` that they are gathered together
+
+```python
+results = await asyncio.gather(
+    A(),
+    B(),
+    return_exceptions=True
+)
+```
+
+If A raises `ValueError` and B succeeded, gather() not cancel B. It return `[ValueError(), 'B finished']`.
+
+```text
+A fails
+    ↓
+gather notices the failure
+    ↓
+return_exceptions=True
+    ↓
+failure becomes a result
+    ↓
+B continues
+    ↓
+gather waits for B
+    ↓
+both outcomes returned
+```
+
+where:
+
+```text
+gather itself is cancelled
+    ↓
+gather cancels its children
+    ↓
+A + B are cancelled
 ```

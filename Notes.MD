@@ -607,3 +607,18 @@ By default, `gather()` propagates the first exception it encounters to the calle
 
 With `return_exceptions=True`, exceptions are returned as results instead of being immediately propagated, allowing the caller to handle partial failures.
 
+`cancel()` it does not end the whole process. It targets specific task and it does not simply kill the coroutine immediately. It marks the task as being cancelled/schedules a cancellation request.
+
+Cancellation can be delivered cleanly in suspended task.
+
+``` text
+task.cancel()
+     ↓
+request cancellation
+     ↓
+coroutine reaches an await point
+     ↓
+CancelledError is raised inside the coroutine
+     ↓
+coroutine can terminate
+```

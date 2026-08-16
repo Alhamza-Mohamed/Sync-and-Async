@@ -678,3 +678,32 @@ gather cancels its children
     ↓
 A + B are cancelled
 ```
+
+`wait_for` function that is used for cancelling an async function after passing specific amount of time, If an operation hasn't completed in specific time, request its cancellation.
+
+Using a raise in the exception will cause TimeoutError.  
+
+``` python
+async def slow_operation():
+    try:
+        await asyncio.sleep(10)
+    except asyncio.CancelledError:
+        print("operation cancelled")
+        raise
+```
+
+`raise` is used after the `except`. It re-throw the exception that is currently being handled.  
+It is like: "Yes, I caught it, but I am not claiming that the cancellation didn't happen. Pass it upward."
+
+The cancellation is the mechanism used to stop the operation, while `TimeoutError` is what the caller ultimately sees as the reason the timeout wrapper failed.
+
+Without a raise in the exception it will cause CancellationError.
+
+``` python
+async def slow_operation():
+    try:
+        await asyncio.sleep(10)
+    except asyncio.CancelledError:
+        print("operation cancelled")
+        # no raise
+```

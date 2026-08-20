@@ -679,6 +679,8 @@ gather cancels its children
 A + B are cancelled
 ```
 
+### Times out.
+
 `wait_for` function that is used for cancelling an async function after passing specific amount of time, If an operation hasn't completed in specific time, request its cancellation.
 
 Using a raise in the exception will cause TimeoutError.  
@@ -707,3 +709,85 @@ async def slow_operation():
         print("operation cancelled")
         # no raise
 ```
+
+When `wait_for()` reaches its timeout, it cancels the awaited operation. Once the cancellation is handled, the timeout is reported to the caller as `TimeoutError`.
+
+
+`wait_for()` is not receiving `CancelledError` and then deciding to "I will call this `TimeoutError`" in a simple exception-conversion sense.  
+Internally, it knows it initiated the cancellation because its timeout expired, and once the cancellation completes, teh timeout boundary is reported to the caller as `TimeoutError`.
+
+`asyncio.timeout()` and `asyncio.wait_for()` both enforce time limits. `wait_for()` applies teh timeout directly to an awaitable, while `timeout()` establish a timeout boundary around a block of code.
+
+Instead of:
+
+```python
+await asyncio.wait_for(work(), timeout=2)
+```
+
+You can write:
+
+```python
+async with asyncio.timeout(2):
+    await work()
+```
+
+ Both are ways of enforcing a time limit. The difference is mainly where the timeout boundary is expressed.
+
+In `timeout` each individual operations collectively have to fit within the deadline.
+
+```python
+async with asyncio.timeout(5):
+    await get_user() → 1 second
+    await get_preferences() → 2 seconds
+    await get_recommendations() → 4 seconds
+```
+
+So the execution is:
+
+```text
+get_user()
+   ↓ await
+   ↓ 1 sec
+returns
+   ↓
+get_preferences()
+   ↓ await
+   ↓ 2 sec
+returns
+   ↓
+get_recommendations()
+   ↓ await
+   ↓ 4 sec
+returns
+
+Total: 1 + 2 + 4 = 7 seconds
+```
+
+Using `gather` allows the operations to make progress concurrently.
+
+```python
+async with asyncio.timeout(5):
+    await asyncio.gather(
+        get_user(),
+        get_preferences(),
+        get_recommendations()
+    )
+```
+
+The structure:
+
+```text
+asyncio.timeout(5)
+        │
+        └── gather(...)
+              ├── get_user()           → 1s
+              ├── get_preferences()    → 2s
+              └── get_recommendations()→ 4s
+max(1, 2, 4) = 4 seconds
+```
+
+So they finish before the 5 second deadline.
+
+The timeout is a single deadline shared by everything inside the `asyncio.timeout()` block.
+
+`asyncio.timeout()` does not give `gather()` a separate timeout for each operation. It establish one deadline for the entire block containing the `gather()`.

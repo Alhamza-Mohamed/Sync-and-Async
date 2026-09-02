@@ -1,5 +1,9 @@
 # Sync and Async
 
+Synchronous (Sync) execution: The operations happen one after another  in order. Each operation must finish (executed) before the next one starts.
+
+Asynchronous (Async) execution: An operation can be started and suspended while waiting, instead of blocking allowing other work to make progress before that operation finishes.
+
 ## Why Async exists
 
 Blocking operation: operation that prevents your program from making progress until the operation finishes.
@@ -790,4 +794,95 @@ So they finish before the 5 second deadline.
 
 The timeout is a single deadline shared by everything inside the `asyncio.timeout()` block.
 
-`asyncio.timeout()` does not give `gather()` a separate timeout for each operation. It establish one deadline for the entire block containing the `gather()`.
+`asyncio.timeout()` does not give `gather()` a separate timeout for each operation. It establish one deadline for the entire block containing the `gather()`.  
+If one operation in gather is cancelled due to timeout the whole gather operation is cancelled. 
+
+### Async generators and streaming
+
+**Async generator**  
+
+`yield`: produces a value and suspends the generator, preserving its state so it can resume later.
+
+**Coroutine vs. Async generator**  
+
+**Coroutine**  
+
+```python
+async def get_data():
+    return "hello"
+
+coro = get_data() # coro is coroutine object
+```
+
+Coroutine object: represents the computation that eventually produces one result when awaited.
+
+**Async generator**  
+
+```python
+async def numbers():
+    yield 1
+    yield 2
+    yield 3
+
+result = numbers() # result is async generator object
+```
+
+Async generator object: represents a computation that can produce multiple results overtime.
+
+Key distinction: A coroutine is awaited to obtain its result; an async generator is iterated asynchronously to receive a sequence of values produced over time.
+
+**Async iterator**  
+
+`__aiter__()`: Returns the async iterator.
+
+`__anext__()`: return the next value.
+
+```python
+async for x in asynchronous(): # Async iterator where asynchronous() is async generator function
+```
+
+```python
+
+# async iterator
+
+async def async_iterator_numbers():
+    for i in range(3):
+        await asyncio.sleep(1)
+        yield i
+
+# async iterator with sleep
+async for number in async_iterator_numbers():
+    print(number)
+    await asyncio.sleep(5)
+
+
+
+```
+
+Using time delay in iterator with async generator will result in the generator stopping until the iterator's time delay is over, then the generator start to be resumed.  
+The async generator (the producer) is suspended because the consumer (`async for`) is currently waiting/sleeping, not because the iterator somehow blocks it.
+
+Async generator produces the next value only when the consumer request it. if the consumer suspends after receiving a value, the generator remains suspended until the consumer requests the next value.
+
+**Backpressure**  
+
+in back pressure the producer work independently from the consumer, while the consumer is suspended the producer can continue running and produce outputs(data).  
+The outputs is stored in queue (`asyncio.Queue`).
+
+The queue is a buffer between a fast producer and a slow consumer.
+
+Suppose the producer generates 1000 times per seconds, but the consumer can produce only 10 per second, we will find a problem which is the maximum capacity of the queue, and eventually the producer fills it.
+
+When the queue is full the producer waits until the consumer removes something so it can have some free space, and this called **backpressure**.
+
+**Backpressure:** The slow consumer effectively pushes pressure backward toward the producer, preventing the producer from endlessly creating data and consuming unlimited memory.
+
+Backpressure is what happens when a producer is forced to slow down because the consumer can't keep up.
+
+When the queue gets full the producer itself become suspended while the consumer continues running, after the consumer get the data, space becomes available in the queue allowing producer to resume.  
+`asyncio.Queue` is FIFO by default, so `get()` takes the oldest item first. `get()` is the queue's consumption operation, so it removes and returns the oldest item.
+
+Suspending one task does not suspend the event loop. The producer can be suspended while the consumer runs, then the consumer can be suspended while the producer runs, the event loop coordinates both.
+
+We can deal with slow consumer by using backpressure, so producer waits temporarily and consumer eventually progress.  
+For stuck consumer the producer may wait forever and the consumer never progresses, so we can use timeouts and cancellation

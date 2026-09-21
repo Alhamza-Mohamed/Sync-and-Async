@@ -1,3 +1,22 @@
+
+- [Sync and Async](#sync-and-async)
+  - [Why Async exists](#why-async-exists)
+  - [CPU-bound vs I/O bound](#cpu-bound-vs-io-bound)
+    - [CPU-bound](#cpu-bound)
+    - [I/O bound](#io-bound)
+  - [Concurrency and parallelism](#concurrency-and-parallelism)
+    - [Concurrency](#concurrency)
+    - [`await` vs `yield`](#await-vs-yield)
+    - [Parallelism](#parallelism)
+  - [Processes and threads](#processes-and-threads)
+    - [Process](#process)
+    - [Thread](#thread)
+  - [Event loop](#event-loop)
+  - [Async in python](#async-in-python)
+    - [Timeouts.](#timeouts)
+    - [Async generators and streaming](#async-generators-and-streaming)
+    - [Context mangers](#context-mangers)
+
 # Sync and Async
 
 Synchronous (Sync) execution: The operations happen one after another  in order. Each operation must finish (executed) before the next one starts.
@@ -95,6 +114,12 @@ Cons:
 - Context switching has overhead.
 - Scheduling becomes more complex
 - Shared state can become harder to reason about because a task can be interrupted at essentially any point.
+
+### `await` vs `yield`
+
+`await`: suspends a coroutine while waiting for an awaitable.
+
+`yield`: produces a value and suspends a generator, preserving its state until the next value is requested
 
 ### Parallelism
 
@@ -278,7 +303,7 @@ A thread has execution state too. The difference is that a thread is an operatin
 
 ---
 
-### Event loop
+## Event loop
 
 The component that is responsible for managing the coroutines.  
 
@@ -286,7 +311,14 @@ The event loop is the mechanism that enables cooperative concurrency in async pr
 
 A task runs until it reaches an `await` point where it cannot make progress, then it yields control back to the event loop.  The event loop can then give the execution opportunity to another ready task.
 
-THe scheduling is **cooperative** because the event loop does not forcibly interrupt a running task. The task must reach a point where it yields control,  typically through `await`.
+**Task state:** A task can be running, waiting/suspended, ready to resume, or completed:
+
+- Running: currently executing.
+- Waiting/suspended: cannot currently make progress, usually because it is waiting for an awaited operation.
+- Ready: able to continue execution when the event loop schedules it.
+- Complete: finished execution and produces a result or execution
+
+The scheduling is **cooperative** because the event loop does not forcibly interrupt a running task. The task must reach a point where it yields control,  typically through `await`.
 
 The relationship is  like:
 
@@ -479,6 +511,12 @@ Eventually it may reach another `await`
 
 `await` is not merely "wait until this function finishes". It means gives the current execution flow a coroutine to execute and allows that coroutine to suspend when it reaches an awaitable operation. i.e. "Suspend this coroutine while this awaitable is incomplete allowing the event loop to run other work"
 
+**await vs yield**  
+
+`await`: suspends a coroutine while it waits for an awaitable to make progress.
+
+`yield`: produces a value from a generator and suspends the generator until the consumer requests the next value.
+
 `asyncio.create_task`  Means schedules a coroutine as a task on the event loop. It does not create a thread.
 
 `asyncio.run()` is the entry point that takes the coroutine-based program and gives it an event loop to execute it. It establish the environment in with the async program can run.
@@ -627,6 +665,9 @@ CancelledError is raised inside the coroutine
 coroutine can terminate
 ```
 
+`task.cancel` is a cancellation request, not an immediate termination.  
+The task becomes cancelled only after the coroutine actually respond to the cancellation and finishes as cancelled.
+
 > **Coroutine can handle the cancellation or terminate**
 
 Because this is exactly what you are going to discover in your notebook. A coroutine can catch  `CancelledError`, perform cleanup, and potentially even suppress the cancellation.
@@ -683,7 +724,7 @@ gather cancels its children
 A + B are cancelled
 ```
 
-### Times out.
+### Timeouts.
 
 `wait_for` function that is used for cancelling an async function after passing specific amount of time, If an operation hasn't completed in specific time, request its cancellation.
 
@@ -871,6 +912,12 @@ The outputs is stored in queue (`asyncio.Queue`).
 
 The queue is a buffer between a fast producer and a slow consumer.
 
+**Buffering vs backpressure**  
+
+**Buffering** means temporarily storing produced data so the producer and consumer do not need to operate at exactly the same time.
+
+**Backpressure** happens when the buffer reaches its limit and the producer must slow down or wait because the consumer cannot keep up.
+
 Suppose the producer generates 1000 times per seconds, but the consumer can produce only 10 per second, we will find a problem which is the maximum capacity of the queue, and eventually the producer fills it.
 
 When the queue is full the producer waits until the consumer removes something so it can have some free space, and this called **backpressure**.
@@ -886,3 +933,259 @@ Suspending one task does not suspend the event loop. The producer can be suspend
 
 We can deal with slow consumer by using backpressure, so producer waits temporarily and consumer eventually progress.  
 For stuck consumer the producer may wait forever and the consumer never progresses, so we can use timeouts and cancellation
+
+The queue is useful when:
+
+- The consumer can be suspended but we want the generator/producer to keep producing data.
+- The producer is needed to be independent from the consumer.
+
+> Use a queue when the producer should be able to continue independently of the consumer and therefore needs somewhere to buffer its output.
+
+### Context mangers
+
+When you manually acquire resource:
+
+```python
+file = open("data.txt")
+
+# use the file
+data = file.read()
+
+file.close()
+```
+
+The life cycle is acquire resource -> use it -> release resource.
+The problem is what happens if something goes wrong while using it?
+
+Example:
+
+```python
+file = open("data.txt")
+
+data = file.read()
+
+process(data)   # imagine this raises an exception
+
+file.close()
+```
+
+If `process(data)` raises an exception, execution jumps out of that normal sequence. normal sequence. The `file.close` line may never execute.  
+So we acquired the resource but we potentially never released.
+
+The same pattern appears every where in programming:
+
+```text
+open file -> close file
+open database -> close connection
+acquire lock -> release lock
+open network -> close connection
+allocate temp resource -> clean it up
+```
+
+Here is  why `with` exists.
+
+iIt acquire resource -> use it -> cleanup.  
+The important part is that cleanup belongs to the lifecycle of the resource rather than being something manually you remember to do at the end.  
+
+`with` does'nt mean "close the resource". It guarantees that the context manager's exit behavior is invoked.  
+So, it:
+
+- Prevents the caller from having to manually remember the cleanup step.
+- The context manager's `__exit__()` is invoked when leaving the `with` block.
+
+**Why is leaving a resource open actually a problem?**  
+Because a resource usually represents  something that the operating system, a server, or another system is actively keeping track of.
+
+Example for a file, if you do `f = open("data.txt")` python doesn't merely create a python object. It asks the operating system to open the file and gives your process access to that OS-level resource.  
+
+So if the file was never closed, that OS resource can remain allocated. For a single file, we might not notice anything but imagine doing this for thousands of files. 
+
+```python
+for filename in thousands_of_files:
+    f = open(filename)
+    # use f
+    # forget to close it
+```
+
+Eventually you can run into limits on how many files/resources your process is allowed to have open.
+
+The files are not the only example, this can happen with database connection, where leaving a connection open unnecessarily can consume connection-pool/server capacity.  
+
+Other case is lock:
+
+```python
+lock.acquire()
+
+# something goes wrong
+
+# lock.release() never happens
+```
+
+In this case the lock will never got released so another task/thread might wait indefinitely for that lock.
+
+**Lock:** it is a synchronization mechanism used when multiple concurrent pieces of code need to access something shared. The lock provides a way of allowing one piece of code to access shared thing.
+
+Example: 2 tasks (A,B) accessing the same shared variable `balance = 100` task A: withdraw 80, task B: withdraw 50. Without some coordination both could observe `balance = 100` and before either one updates it they both read it in the same time resulting in a wrong final value calculation:
+
+```text
+Task A: reads balance → 100
+Task B: reads balance → 100
+
+Task A: calculates → 20
+Task B: calculates → 50
+
+Task A: writes → 20
+Task B: writes → 50
+```
+
+The final value becomes 50, even both withdrawals together were 130.  
+The concurrency problem caused by multiple operations interacting with shared state.
+
+With lock: task B waits until task A finish using hte shared resources then release the lock:
+
+```text
+             Lock
+              ↓
+Task A → [ acquire ] → use shared resource → [ release ]
+                                                ↑
+                                                │
+Task B → waits ─────────────────────────────────┘
+```
+
+**Resource leak:** the program acquires some resource but fails to properly release it after  no longer needed.
+
+**What actually makes an object work with `with`?**  
+
+`with` manages a resource's lifecycle: enter/setup → use → exit/cleanup.  
+python needs a way to know what "enter" and "exit" mean for a particular object.  
+That's where `__enter__()` and `__exit__()` come in.
+
+Suppose `with resource: ---` the resource lifecycle:
+
+```text
+        with block starts
+              ↓
+        __enter__()
+              ↓
+        code inside with
+              ↓
+        __exit__()
+              ↓
+        with block finished
+```
+
+`__enter__()` is responsible for the entering/setup side, like:
+
+- Open resource.
+- Acquire lock.
+- Start transaction.
+- Establish connection.
+
+`__exit__()` is responsible for the leaving/cleanup side, like:
+
+- Close resource.
+- Release lock.
+- Rollback/commit transaction.
+- Close connection.
+
+**Tiny custom context manger**  
+
+```python
+class Resource:
+    def __enter__(self):
+        print("ENTER")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        print("EXIT")
+
+
+with Resource():
+    print("INSIDE")
+    raise ValueError("Something went wrong")
+
+print("AFTER")
+```
+
+The output of the previous code is:
+
+```text
+ENTER
+INSIDE
+EXIT
+ValueError: Something went wrong
+```
+
+Notice that "Enter", "INSIDE", "EXIT" got printed before the ValueError.  
+Also the error Continue outside the `with` block and "After" wasn't printed.  
+
+The three arguments of `__exit__` becomes important in the error cases:
+
+``` python
+def __exit__(self, exc_type, exc_value, traceback):
+```
+
+In our example:
+
+`exc_type`: ValueError.
+`exc_value`: ValueError("Something went wrong").
+`traceback`: traceback information.
+
+The `exc_value` is the actual exception object, not just the "Something went wrong".
+
+- `exc_type`: What kind of exception.
+- `exc_value`: "what exception object / message?"
+- `traceback`: "where in the execution path did it happen?"
+
+A traceback is the execution history that tells python where the exception came from.
+
+Without the 3 args "EXIT"  will not be printed and we receive TypeError in addition to the Value error, why?  
+Because `__exit__()` is the method responsible for the exit part of teh context manager protocol (when we use `with`). But python can only invoke the method if the method has the required signature.
+
+So in case of:
+
+``` python
+def __exit__(self):
+```
+
+When error happens the python called it like:
+
+```python
+resource.__exit__(exc_type, exc_value, traceback)
+```
+
+Since `self` is passed automatically we have 4 positional argument total, and our method only have one which is `self`.  
+So python attempted to call `__exit__()` but the call itself failed with TypeError:
+
+```text
+TypeError:
+Resource.__exit__() takes 1 positional argument but 4 were given
+```
+
+Thats why `"EXIT"` never printed.
+
+The sequence:
+
+```text
+ENTER
+  ↓
+INSIDE
+  ↓
+ValueError occurs
+      ↓
+Python tries to call __exit__(...)
+      ↓
+__exit__ has the wrong signature
+      ↓
+TypeError occurs while trying to call __exit__
+```
+
+If nothing goes wrong, `__exit_()` is still called. but if there is an error (like `raise ValueError(`error`)`) `__exit_()` is also called, but python gives it information about the exception:
+
+`exc_type` = None
+`exc_value` = None
+`traceback` = None
+
+If an exception occurs inside the `with` bock, python calls `__exit__()` with information about that exception.
+
+Note: `__exit__` can handle the exception depending on what it does with the received arguments.

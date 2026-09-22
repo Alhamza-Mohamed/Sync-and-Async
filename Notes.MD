@@ -16,6 +16,7 @@
     - [Timeouts.](#timeouts)
     - [Async generators and streaming](#async-generators-and-streaming)
     - [Context mangers](#context-mangers)
+      - [Lifecycle of a `with` statement](#lifecycle-of-a-with-statement)
 
 # Sync and Async
 
@@ -1189,3 +1190,162 @@ If nothing goes wrong, `__exit_()` is still called. but if there is an error (li
 If an exception occurs inside the `with` bock, python calls `__exit__()` with information about that exception.
 
 Note: `__exit__` can handle the exception depending on what it does with the received arguments.
+
+#### Lifecycle of a `with` statement
+
+```python
+with Resource() as x:
+    do_something(x)
+```
+
+There is two important moments in the code:
+
+Entering
+
+```python
+x = resource.__enter__()
+```
+
+Leaving:
+
+```python
+resource.__exit__(...)
+```
+
+Python invokes the exit behavior regardless of whether the block finished normally or an exception.  
+
+When the block finishes normally:
+
+exc_type = None  
+exc_value = None  
+traceback = None  
+
+When an error occurs:
+
+exc_type = the exception type  
+exc_value = the exception object  
+traceback = traceback information  
+
+So:
+
+```text
+Normal execution:
+
+__enter__()
+    ↓
+body
+    ↓
+__exit__()
+    ↓
+continue
+
+
+Exception:
+
+__enter__()
+    ↓
+body
+    ↓
+exception
+    ↓
+__exit__()
+    ↓
+exception propagated OR suppressed
+```
+
+This is the key reason `with` solved the resource-lifecycle problem.
+
+```python
+class Connection:
+    def __enter__(self):
+        print("Connection opened")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        print("Connection closed")
+
+with Connection() as conn:
+    print("Doing work")
+```
+
+`conn` is a variable(name) that refers to whatever object `__enter__()` returns.  
+Because `__enter__()` returns `self` in this example, `conn` refers to the same `Connection` object created by `Connection()`
+
+`return self` means return this particular `Connection` object, and `conn` refers to that object, which mean that `conn` is a name/variable that points to an object in memory.
+
+> An object is the actual thing in memory; a variable/name is a way to refer to that object. `return self` returns the current object so `conn` receive a reference to that same object.
+
+
+```python
+class Resource:
+    def __enter__(self):
+        print("ENTER")
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        print("EXIT")
+        return True
+
+with Resource():
+    print("INSIDE")
+    raise ValueError("Something went wrong")
+
+print("AFTER")
+```
+
+In the previous example, the output will be:
+
+```text
+ENTER
+INSIDE
+EXIT
+AFTER
+```
+
+and there is no unhandled `ValueError`, why?  
+The return value of `__exit__()` has special meaning. When `__exit__()` returns `True`, it tells python "The exception that occurred inside this context has been handled. Do not propagate it."  
+
+The flow:
+
+```text
+ValueError occurs
+       ↓
+__exit__(ValueError, ...)
+       ↓
+__exit__ returns True
+       ↓
+Python suppresses the exception
+       ↓
+execution continues after the with block
+       ↓
+print("AFTER")
+```
+
+`__exit__()` didn't magically make the exception disappear. it made a decision about what python should do with the exception by returning `True`.
+
+**The complete context manager-mental model:**
+
+```text
+with Resource() as x:
+        ↓
+create Resource
+        ↓
+__enter__()
+        ↓
+x = whatever __enter__ returns
+        ↓
+run body
+        ↓
+body finishes OR exception occurs
+        ↓
+__exit__(exc_type, exc_value, traceback)
+        ↓
+__exit__ performs exit/cleanup behavior
+        ↓
+return True?
+   ↙       ↘
+ yes        no/None
+  ↓           ↓
+suppress    propagate
+exception   exception
+```

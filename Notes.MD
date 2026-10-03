@@ -15,8 +15,9 @@
   - [Async in python](#async-in-python)
     - [Timeouts.](#timeouts)
     - [Async generators and streaming](#async-generators-and-streaming)
-    - [Context mangers](#context-mangers)
+    - [Context managers](#context-managers)
       - [Lifecycle of a `with` statement](#lifecycle-of-a-with-statement)
+    - [Async context managers](#async-context-managers)
 
 # Sync and Async
 
@@ -942,7 +943,7 @@ The queue is useful when:
 
 > Use a queue when the producer should be able to continue independently of the consumer and therefore needs somewhere to buffer its output.
 
-### Context mangers
+### Context managers
 
 When you manually acquire resource:
 
@@ -1349,3 +1350,141 @@ return True?
 suppress    propagate
 exception   exception
 ```
+
+### Async context managers
+
+The life cycle of context mangers includes getting the resource at the start and close it at the end. The question is why ordinary `__enter__()` and `__exit__()` are not enough?  
+The process of getting the resource and closing it may have a waiting time depends on the resource itself. Suppose an HTTP client needs to establish or clean up network-related state, this time can be used to execute other ready tasks.
+
+for the ordinary `with`, python uses:  
+`__enter__()` for entering/setup the resource , and for exiting/close the resource `__exit__(...)`.
+
+An ordinary context manager `__enter__()` and `__exit__()` can't use `await` because those are normal functions.  
+As async context manager `async def __aenter__()` and `async def __aexit__()`.
+
+In the `async with`, python uses:  
+`await __aenter__()` for entering/setup the resource asynchronously, and for exiting/close the resource asynchronously`await __aexit__(...)`.
+
+```python
+async def __aenter__(self):
+    await asyncio.sleep(2)
+    print("CONNECTED")
+    return self
+```
+
+For this code, during the 2 seconds of sleeping the event loop suspends the current task then go for execute ready tasks.  
+The suspension happens at the `await` inside `__aenter__()` not because `async with` itself magically pauses.
+
+`async` does not mean `__aenter__()` must suspended, if the awaited operation is already immediately complete, there may no meaningful scheduling opportunity.
+
+```text
+ordinary context manager
+    with
+      ↓
+__enter__()
+__exit__()
+
+
+asynchronous context manager
+    async with
+      ↓
+await __aenter__()
+await __aexit__()
+```
+
+Async does not remove the waiting time. It prevents the waiting time from unnecessarily occupying the event loop.
+
+**We can't simply do:**
+
+```python
+class Resource:
+    async def __enter__(self):
+        ...
+
+    async def __exit__(self, exc_type, exc_value, traceback):
+        ...
+```
+
+Because `with` and `async with` are two different protocols.  
+Ordinary `with resource:` expects the synchronous context-manager protocol `resource.__enter__()`,`resource.exit()`.  
+
+While `async with resource:` expects teh asynchronous context-manager protocol: `await resource.__aenter__()`, `await resource.__aexit__(...)`. The distinction matters because python needs to know whether entering/leaving the resource can involve asynchronous suspension.  
+
+In ordinary `with`:  
+`with resource:`  
+The entering operation is synchronous:
+
+```text
+__enter__()
+   ↓
+must finish
+   ↓
+body starts
+```
+
+If `__enter__` did some blocking network operation, that operation could block the event loop if called from async code.
+
+With `async with`:  
+`async with resource:`  
+Python explicitly knows:  
+
+```text
+__aenter__()
+     ↓
+await
+     ↓
+may suspend
+     ↓
+event loop can run other Tasks
+     ↓
+finished
+     ↓
+body starts
+```
+
+The same distinction with applies when leaving:
+
+```text
+with
+ ↓
+__exit__()
+ ↓
+done
+```
+
+versus:
+
+```text
+async with
+ ↓
+await __aexit__()
+ ↓
+may suspend
+ ↓
+event loop runs other Tasks
+ ↓
+done
+```
+
+So `__aenter__` and `__aexit__` aren't just differently named versions of `__enter__` and `__exit__`, They represent different protocols:
+
+```text
+Synchronous context manager
+        ↓
+with
+        ↓
+__enter__ / __exit__
+
+
+Asynchronous context manager
+        ↓
+async with
+        ↓
+__aenter__ / __aexit__
+        ↓
+awaitable lifecycle operations
+```
+
+An async context manager doesn't necessarily have to perform I/O in both methods. `__aenter__()` and `__aexit__()` can be asynchronous even if a particular implementation happens to complete immediately.  
+The protocol simply allows those lifecycle operations to suspend.
+

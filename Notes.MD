@@ -1651,3 +1651,56 @@ async def get(url):
 what happen is `client.get()` calls the client function, if the client function have waiting time this mean the current task that executing the `get()` coroutine will be suspended.  
 
 i.e. The current task is executing the `get()` coroutine (`get()` is part of the task). When the `get()` coroutine reaches an operation that cannot complete immediately, the whole current task suspended so the event loop gives another task a chance to be executed.
+
+**Running multiple asynchronous operations concurrently**  
+
+Since `await` adds new coroutine to the current task
+
+```python
+
+async def get_users():
+    ...
+
+async def get_products():
+    ...
+
+users = await get_users()
+products = await get_products()
+```
+
+The current task start `get_users()` and waits for it to finish. Only after `get_users()` has completed, it start `get_products()`.
+
+The structure:
+
+```text
+Current Task
+    │
+    ├── await get_users()
+    │       ↓
+    │    wait
+    │       ↓
+    │    result
+    │
+    ├── await get_products()
+    │       ↓
+    │    wait
+    │       ↓
+    │    result
+    │
+    └── continue
+```
+
+Even though both operations are asynchronous, they are not being started concurrently.
+
+Now compare that with:
+
+```python
+users_task = asyncio.create_task(get_users())
+products_task = asyncio.create_task(get_products())
+
+users = await users_task
+products = await products_task
+```
+
+Both operations have been scheduled as independent tasks before the current task waits for their results.  
+`create_task()` exists so we can start asynchronous work now and await its result later.

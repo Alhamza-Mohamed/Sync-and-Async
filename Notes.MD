@@ -13,6 +13,8 @@
     - [Thread](#thread)
   - [Event loop](#event-loop)
   - [Async in python](#async-in-python)
+    - [`await` vs `asyncio.create_task`](#await-vs-asynciocreate_task)
+    - [`asyncio.gather()`](#asynciogather)
     - [Timeouts.](#timeouts)
     - [Async generators and streaming](#async-generators-and-streaming)
     - [Context managers](#context-managers)
@@ -610,6 +612,143 @@ Future
    │
    └── result becomes available
 ```
+
+### `await` vs `asyncio.create_task`
+
+Suppose we have:
+
+```python
+async def get_users():
+    return await client.get("/users")
+```
+
+There is two fundamentally different ways to use it:
+
+```python
+result = await get_users()
+```
+
+`await` means "Run/continue this awaitable as part of my current task, and suspend my current task until it produce a result."
+
+```python
+task = asyncio.create_task(get_users())
+```
+
+`create_task` means "schedule this coroutine as an independent task (new task), and give me the task object immediately so the current task can continue immediately."
+
+Suppose we have:
+
+```python
+async def main():
+    result = await get_users()
+    print(result)
+
+async def background():
+    while True:
+        print("background")
+        await asyncio.sleep(1)
+
+async def program():
+    task = asyncio.create_task(background())
+
+    await main()
+```
+
+Then there is 2 tasks:
+
+- Task1: program
+- Task2: Background
+
+`program` and call `await main()`, so `main()` runs as part of Task 1 (runs before `background()`).  
+Then suppose `main()` reaches `await get_users()`, and `get_users()` is waiting for the network I/O.
+
+Task 1 is suspended, but task 2 already exists:
+
+```text
+Task 1: program → main → waiting for network
+                                  ↓
+                              SUSPENDED
+
+Task 2: background → ready/runs
+```
+
+So the event loop can run `background`.  
+`await` does not magically make another coroutine run. There must already be another task scheduled (or some other ready event for the event loop to handle).
+
+Now return to the original HTTP example:
+
+```python
+async with client:
+    response = await client.get("/users")
+```
+
+the `get()` call produces a coroutine/awaitable, but hte actual network I/O happen inside the client function. Suppose `client.get()` do something like:
+
+```python
+async def get(url):
+    request = prepare_request(url)
+    response = await send_request(request)
+    return response
+```
+
+what happen is `client.get()` calls the client function, if the client function have waiting time this mean the current task that executing the `get()` coroutine will be suspended.  
+
+i.e. The current task is executing the `get()` coroutine (`get()` is part of the task). When the `get()` coroutine reaches an operation that cannot complete immediately, the whole current task suspended so the event loop gives another task a chance to be executed.
+
+**Running multiple asynchronous operations concurrently**  
+
+Since `await` adds new coroutine to the current task
+
+```python
+
+async def get_users():
+    ...
+
+async def get_products():
+    ...
+
+users = await get_users()
+products = await get_products()
+```
+
+The current task start `get_users()` and waits for it to finish. Only after `get_users()` has completed, it start `get_products()`.
+
+The structure:
+
+```text
+Current Task
+    │
+    ├── await get_users()
+    │       ↓
+    │    wait
+    │       ↓
+    │    result
+    │
+    ├── await get_products()
+    │       ↓
+    │    wait
+    │       ↓
+    │    result
+    │
+    └── continue
+```
+
+Even though both operations are asynchronous, they are not being started concurrently.
+
+Now compare that with:
+
+```python
+users_task = asyncio.create_task(get_users())
+products_task = asyncio.create_task(get_products())
+
+users = await users_task
+products = await products_task
+```
+
+Both operations have been scheduled as independent tasks before the current task waits for their results.  
+`create_task()` exists so we can start asynchronous work now and await its result later.
+
+### `asyncio.gather()`
 
 `asyncio.gather()`: It run concurrently, and don't continue until all of them have finished.
 
@@ -1570,137 +1709,3 @@ If the awaited operation is already complete, the coroutine may continue without
 The principle that the two example are illustrate is: `async with` does not transform the code inside the block into asynchronous code.  
 The code inside the block is still synchronous unless that code itself performs asynchronous operations, such as `await`.
 
-**`await` vs `asyncio.create_task`:**
-
-Suppose we have:
-
-```python
-async def get_users():
-    return await client.get("/users")
-```
-
-There is two fundamentally different ways to use it:
-
-```python
-result = await get_users()
-```
-
-`await` means "Run/continue this awaitable as part of my current task, and suspend my current task until it produce a result."
-
-```python
-task = asyncio.create_task(get_users())
-```
-
-`create_task` means "schedule this coroutine as an independent task (new task), and give me the task object immediately so the current task can continue immediately."
-
-Suppose we have:
-
-```python
-async def main():
-    result = await get_users()
-    print(result)
-
-async def background():
-    while True:
-        print("background")
-        await asyncio.sleep(1)
-
-async def program():
-    task = asyncio.create_task(background())
-
-    await main()
-```
-
-Then there is 2 tasks:
-
-- Task1: program
-- Task2: Background
-
-`program` and call `await main()`, so `main()` runs as part of Task 1 (runs before `background()`).  
-Then suppose `main()` reaches `await get_users()`, and `get_users()` is waiting for the network I/O.
-
-Task 1 is suspended, but task 2 already exists:
-
-```text
-Task 1: program → main → waiting for network
-                                  ↓
-                              SUSPENDED
-
-Task 2: background → ready/runs
-```
-
-So the event loop can run `background`.  
-`await` does not magically make another coroutine run. There must already be another task scheduled (or some other ready event for the event loop to handle).
-
-Now return to the original HTTP example:
-
-```python
-async with client:
-    response = await client.get("/users")
-```
-
-the `get()` call produces a coroutine/awaitable, but hte actual network I/O happen inside the client function. Suppose `client.get()` do something like:
-
-```python
-async def get(url):
-    request = prepare_request(url)
-    response = await send_request(request)
-    return response
-```
-
-what happen is `client.get()` calls the client function, if the client function have waiting time this mean the current task that executing the `get()` coroutine will be suspended.  
-
-i.e. The current task is executing the `get()` coroutine (`get()` is part of the task). When the `get()` coroutine reaches an operation that cannot complete immediately, the whole current task suspended so the event loop gives another task a chance to be executed.
-
-**Running multiple asynchronous operations concurrently**  
-
-Since `await` adds new coroutine to the current task
-
-```python
-
-async def get_users():
-    ...
-
-async def get_products():
-    ...
-
-users = await get_users()
-products = await get_products()
-```
-
-The current task start `get_users()` and waits for it to finish. Only after `get_users()` has completed, it start `get_products()`.
-
-The structure:
-
-```text
-Current Task
-    │
-    ├── await get_users()
-    │       ↓
-    │    wait
-    │       ↓
-    │    result
-    │
-    ├── await get_products()
-    │       ↓
-    │    wait
-    │       ↓
-    │    result
-    │
-    └── continue
-```
-
-Even though both operations are asynchronous, they are not being started concurrently.
-
-Now compare that with:
-
-```python
-users_task = asyncio.create_task(get_users())
-products_task = asyncio.create_task(get_products())
-
-users = await users_task
-products = await products_task
-```
-
-Both operations have been scheduled as independent tasks before the current task waits for their results.  
-`create_task()` exists so we can start asynchronous work now and await its result later.

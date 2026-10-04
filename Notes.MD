@@ -18,6 +18,7 @@
     - [Context managers](#context-managers)
       - [Lifecycle of a `with` statement](#lifecycle-of-a-with-statement)
     - [Async context managers](#async-context-managers)
+    - [Async Context Manager with a Network Resource](#async-context-manager-with-a-network-resource)
 
 # Sync and Async
 
@@ -1488,3 +1489,165 @@ awaitable lifecycle operations
 An async context manager doesn't necessarily have to perform I/O in both methods. `__aenter__()` and `__aexit__()` can be asynchronous even if a particular implementation happens to complete immediately.  
 The protocol simply allows those lifecycle operations to suspend.
 
+### Async Context Manager with a Network Resource
+
+Imagine an HTTP client:
+
+```python
+async with client:
+    response = await client.get("/users")
+```
+
+There are two different asynchronous operations happening here.  
+
+First: `async with clint:` this managed the client's lifecycle:
+
+```text
+__aenter__()
+    ↓
+possibly establish/setup resources
+    ↓
+client becomes ready
+```
+
+Second: `await client.get("/users")` this performs an asynchronous network operation:
+
+```text
+send request
+    ↓
+await network response
+    ↓
+current Task suspends
+    ↓
+event loop runs other Tasks
+    ↓
+response arrives
+    ↓
+Task resumes
+```
+
+Then when the block ends:
+
+```text
+__aexit__()
+    ↓
+cleanup/close client resources
+    ↓
+possibly await network/OS cleanup
+```
+
+So there is two different kinds of async behavior:  
+`async with`: manages resource lifecycle.  
+
+`await client.get(...)`: performs an asynchronous operation using that resource.  
+
+`async with` does not makes everything inside the block asynchronous, for example:
+
+```python
+async with client:
+    result = expensive_cpu_calculation()
+```
+
+The `async with` only affects the lifecycle of `client`. It does not change the nature of `expensive_cpu_calculation()`
+
+when it is time for this task to be executed, it will take long time and we cant stop it to start a new ready task.  
+Thats because it is just an operation that require a lot of CPU computation time (CPU bonded operation).  
+
+It is not simply i/o bounded so we can hold it till we got the respond from external source (like getting database values).
+
+Also there is no `await` in the calculation, so the coroutine has no suspension point during that computation and can monopolize the event loop until the calculation finishes.
+
+```python
+async with client:
+    response = await client.get(...)
+```
+
+Here, the `await` on `client.get()` allows the current task to suspend while the asynchronous operation is waiting for I/O.
+
+However, the `await` makes the suspension possible but it does not guarantee that a scheduling switch actually occurs.  
+If the awaited operation is already complete, the coroutine may continue without meaningfully giving another task a chance to run
+
+The principle that the two example are illustrate is: `async with` does not transform the code inside the block into asynchronous code.  
+The code inside the block is still synchronous unless that code itself performs asynchronous operations, such as `await`.
+
+**`await` vs `asyncio.create_task`:**
+
+Suppose we have:
+
+```python
+async def get_users():
+    return await client.get("/users")
+```
+
+There is two fundamentally different ways to use it:
+
+```python
+result = await get_users()
+```
+
+`await` means "Run/continue this awaitable as part of my current task, and suspend my current task until it produce a result."
+
+```python
+task = asyncio.create_task(get_users())
+```
+
+`create_task` means "schedule this coroutine as an independent task (new task), and give me the task object immediately so the current task can continue immediately."
+
+Suppose we have:
+
+```python
+async def main():
+    result = await get_users()
+    print(result)
+
+async def background():
+    while True:
+        print("background")
+        await asyncio.sleep(1)
+
+async def program():
+    task = asyncio.create_task(background())
+
+    await main()
+```
+
+Then there is 2 tasks:
+
+- Task1: program
+- Task2: Background
+
+`program` and call `await main()`, so `main()` runs as part of Task 1 (runs before `background()`).  
+Then suppose `main()` reaches `await get_users()`, and `get_users()` is waiting for the network I/O.
+
+Task 1 is suspended, but task 2 already exists:
+
+```text
+Task 1: program → main → waiting for network
+                                  ↓
+                              SUSPENDED
+
+Task 2: background → ready/runs
+```
+
+So the event loop can run `background`.  
+`await` does not magically make another coroutine run. There must already be another task scheduled (or some other ready event for the event loop to handle).
+
+Now return to the original HTTP example:
+
+```python
+async with client:
+    response = await client.get("/users")
+```
+
+the `get()` call produces a coroutine/awaitable, but hte actual network I/O happen inside the client function. Suppose `client.get()` do something like:
+
+```python
+async def get(url):
+    request = prepare_request(url)
+    response = await send_request(request)
+    return response
+```
+
+what happen is `client.get()` calls the client function, if the client function have waiting time this mean the current task that executing the `get()` coroutine will be suspended.  
+
+i.e. The current task is executing the `get()` coroutine (`get()` is part of the task). When the `get()` coroutine reaches an operation that cannot complete immediately, the whole current task suspended so the event loop gives another task a chance to be executed.

@@ -15,7 +15,7 @@
   - [Async in python](#async-in-python)
     - [`await` vs `asyncio.create_task`](#await-vs-asynciocreate_task)
     - [`asyncio.gather()`](#asynciogather)
-    - [Timeouts.](#timeouts)
+    - [Timeouts](#timeouts)
     - [Async generators and streaming](#async-generators-and-streaming)
     - [Context managers](#context-managers)
       - [Lifecycle of a `with` statement](#lifecycle-of-a-with-statement)
@@ -54,7 +54,7 @@ Python isn't doing hte work, the remote server is. Python is just waiting.
 
 ### CPU-bound
 
-A task is CPU bounded when the processor is actively doing calculations. i.e. Tasks use the processor heavily.
+A task is CPU bound when the processor is actively doing calculations. i.e. Tasks use the processor heavily.
 
 Example:
 
@@ -82,7 +82,7 @@ The CPU does very little word. Most of the elapsed is waiting.
 
 > Don't waste a scarce computational resource waiting for something that doesn't require that resource to be continuously occupied.  
 
-Async/concurrency is especially valuable when work contains periods where it cannot make progress because it is waiting for something external. I.e it is very valuable with I/O bounded tasks not CPU bounded tasks.
+Async/concurrency is especially valuable when work contains periods where it cannot make progress because it is waiting for something external. I.e it is very valuable with I/O bound tasks not CPU bound tasks.
 
 **preemption:** An operating system can interrupt a running CPU task and switch to another task.
 
@@ -866,7 +866,7 @@ gather cancels its children
 A + B are cancelled
 ```
 
-### Timeouts.
+### Timeouts
 
 `wait_for` function that is used for cancelling an async function after passing specific amount of time, If an operation hasn't completed in specific time, request its cancellation.
 
@@ -1692,7 +1692,7 @@ The `async with` only affects the lifecycle of `client`. It does not change the 
 when it is time for this task to be executed, it will take long time and we cant stop it to start a new ready task.  
 Thats because it is just an operation that require a lot of CPU computation time (CPU bonded operation).  
 
-It is not simply i/o bounded so we can hold it till we got the respond from external source (like getting database values).
+It is not simply i/o bound so we can hold it till we got the respond from external source (like getting database values).
 
 Also there is no `await` in the calculation, so the coroutine has no suspension point during that computation and can monopolize the event loop until the calculation finishes.
 
@@ -1709,3 +1709,77 @@ If the awaited operation is already complete, the coroutine may continue without
 The principle that the two example are illustrate is: `async with` does not transform the code inside the block into asynchronous code.  
 The code inside the block is still synchronous unless that code itself performs asynchronous operations, such as `await`.
 
+Example
+
+```python
+class AsyncResource:
+    async def __aenter__(self):
+        print("ENTER")
+        await asyncio.sleep(2)
+        print("READY")
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        print("EXIT")
+        await asyncio.sleep(2)
+        print("CLOSED")
+
+
+async def main():
+    async with AsyncResource() as resource:
+        print("USING")
+        await asyncio.sleep(3)
+        print("DONE")
+
+```
+
+There is 3 separate suspension periods:
+
+1. `__aenter__()`: `await asyncio.sleep(2)`.
+2. The body: `await asyncio.sleep(3)`
+3. `__aexit__()`: `await asyncio.sleep(2)`
+
+This gives us clear distinction:
+
+1. Resource acquisition (`__aenter__()`): may suspend.
+2. Resource usage (body): may suspend.
+3. Resource cleanup `__aexit__()`: may suspend.
+
+`async with` does not create these suspension points by itself, the suspension happens because the as ync context-manager methods and the body contain awaitable operations.
+
+Imagine as async HTTP client with this lifecycle:
+
+```python
+async with client:
+    response = await client.get("/users")
+    data = await response.json()
+```
+
+There are tree different asynchronous operations:
+
+1. `__aenter__()`: establish/prepare the client resource
+2. `client.get(...)`: perform network I/O
+3. `response.json()`: possibly perform additional asynchronous work
+
+And then `__aexit__()`: clean up the client resource.
+
+All four can potentially contain suspension points, but they serve different purposes.
+
+The operations are asynchronous but all of them depend each other, so we can't work concurrently within the same block.  
+
+We can't start `client.get()` before the client has been successfully acquired, and you can't start `response.json()` before you have the response.
+
+The operations within this particular workflow are sequential/dependent, but the task execute concurrently with other tasks whenever it reaches an actual suspension point.
+
+**Client with cpu bound function**  
+
+Suppose the client have function:
+
+```python
+async with client:
+    result = client.calculate_something()
+```
+
+Where `calculate_something()` is an ordinary CPU-bound synchronous function.  
+The `async with` will not make `calculate_something()` asynchronous, as `calculate_something()` is ordinary synchronous CPU-bound code.  
+The execution of the function consume CPU computation, the event loop can't take control away from the task simply because the calculation is taking a long time.

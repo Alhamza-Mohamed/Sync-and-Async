@@ -21,6 +21,7 @@
       - [Lifecycle of a `with` statement](#lifecycle-of-a-with-statement)
     - [Async context managers](#async-context-managers)
     - [Async Context Manager with a Network Resource](#async-context-manager-with-a-network-resource)
+    - [Async streaming](#async-streaming)
 
 # Sync and Async
 
@@ -1058,7 +1059,7 @@ The queue is a buffer between a fast producer and a slow consumer.
 
 **Buffering** means temporarily storing produced data so the producer and consumer do not need to operate at exactly the same time.
 
-**Backpressure** happens when the buffer reaches its limit and the producer must slow down or wait because the consumer cannot keep up.
+**Backpressure** mechanism happens when the buffer reaches its limit and the producer forced to slow down or wait because the consumer cannot keep up.
 
 Suppose the producer generates 1000 times per seconds, but the consumer can produce only 10 per second, we will find a problem which is the maximum capacity of the queue, and eventually the producer fills it.
 
@@ -1783,3 +1784,162 @@ async with client:
 Where `calculate_something()` is an ordinary CPU-bound synchronous function.  
 The `async with` will not make `calculate_something()` asynchronous, as `calculate_something()` is ordinary synchronous CPU-bound code.  
 The execution of the function consume CPU computation, the event loop can't take control away from the task simply because the calculation is taking a long time.
+
+### Async streaming
+
+**Streaming** means receiving or producing data progressively over time instead of waiting for the entire result to be available before receiving anything.  
+Streaming itself is not an async concept. We can have streaming without python `asyncio`, and we can have async code that is not streaming.
+
+Streaming describe how the data is delivered: " Don't wait for the complete result; deliver pieces as they become available."  
+Async describes how the program handles waiting and concurrency: "When I have to wait for the next piece, don't block the execution thread; suspend and let other work run."
+
+Streaming isn't necessarily means "many small pieces." A chunk could be a token, sentence, audio packet, database record, etc. The size and meaning of a chunk depends on the system.
+
+Suppose we have:
+
+```python
+async def stream_data():
+    async with AsyncResource() as resource:
+        async for chunk in resource:
+            yield chunk
+```
+
+and the consumer does:
+
+```python
+async for chunk in stream_data():
+    print(chunk)
+```
+
+What happen is when the consumer receives the first `chunk`,  the resource was acquired, the stream produced the first `chunk`, **and the resource is still held** because the stream is still active.  
+Thats because the resource is still needed after receiving the first `chunk`.  
+
+When the stream is waiting for the next chunk the task can suspend:
+
+```text
+Task
+ ↓
+process chunk 1
+ ↓
+await next chunk
+ ↓
+SUSPENDED
+        ↓
+        event loop runs other Tasks
+        ↓
+chunk 2 arrives
+        ↓
+Task resumes
+ ↓
+process chunk 2
+```
+
+So we have two different things happening simultaneously at the concept level:  
+
+- The resource life cycle: determine who long the underlying resource remains available.  
+- The stream: determines how data progressively moves through that resource.  
+
+And the task may repeatedly suspend while waiting for more data.  
+
+The resource stays open while the task that uses it is suspended.  
+Task suspension does not mean resource suspension or resource closer.  
+The resource is released/closed when the stream/lifecycle is finished, which may involve detecting end-of-stream and performing cleanup.
+
+Suppose:  
+
+```python
+async def consume():
+    async with resource:
+        async for chunk in stream:
+            process(chunk)
+```
+
+The stream produces 3 chunks and after the last chunk, the stream signals "there is no more data."  
+When the stream signals that there are no more chunks:
+
+```text
+stream ends
+   ↓
+async for finishes
+   ↓
+execution continues after the async for
+   ↓
+execution reaches the end of async with
+   ↓
+__aexit__() runs
+   ↓
+resource is closed/released
+```
+
+In the notebook `Streaming example 1`:  
+The end of the stream does no automatically mean the resource is closed.  
+The stream ended first. Execution was still inside the `async with` block, so the resource remained available until the `async with` scope actually ended.
+
+``` text
+async with
+┌────────────────────────────────────────┐
+│                                        │
+│   async for                            │
+│   ┌────────────────────────────────┐   │
+│   │ A → B → C → END                │   │
+│   └────────────────────────────────┘   │
+│                                        │
+│   still inside resource lifecycle      │
+│                                        │
+└────────────────────────────────────────┘
+                    ↓
+                __aexit__()
+```
+
+The `async with` owns the resource lifecycle; the stream uses the resource during part of that lifecycle.
+
+In the notebook `Streaming example 2: Another task while the steaming is waiting`:  
+
+The important part is the end: 
+
+```text
+Stream: END
+After async for
+```
+
+At this point, the stream has finished, but the resource is still open.
+
+**Streaming does not necessarily mean buffering**  
+
+Consider if producer is generating chunks faster than the consumer can process them.  
+If the producer and consumer are independent, something has to happen to the chunks that the consumer hasn't processed yet.
+
+>If production and consumer happen at different rates, the difference has to be handled somewhere
+
+If the producer produces 10 chunks/sec, and the consumer consumes 2 chunks/sec then the system has to deal with the extra 8 chunks/sec somehow.  
+**Buffering** is one solution:
+
+``` text
+Producer
+   ↓
+[A B C D E F G H]
+   ↓
+Consumer
+   ↓
+processes A
+```
+
+The producer doesn't necessarily have to stop immediately, and the consumer doesn't have to process everything at the exact moment it is produced.
+
+Streaming system can have:
+
+```python
+Resource
+   ↓
+Producer
+   ↓
+Buffer
+   ↓
+Consumer
+```
+
+When the buffer reaches its limit, backpressure prevent unlimited accumulation by making the producer slow down or wait.  
+
+When the suspension due to the backpressure is happen the resource stays open.
+
+> Suspension doesn't necessarily mean the resource is closed.

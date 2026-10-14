@@ -1904,8 +1904,7 @@ After async for
 
 At this point, the stream has finished, but the resource is still open.
 
-**Streaming does not necessarily mean buffering**  
-
+**Streaming does not necessarily mean buffering.**  
 Consider if producer is generating chunks faster than the consumer can process them.  
 If the producer and consumer are independent, something has to happen to the chunks that the consumer hasn't processed yet.
 
@@ -1943,3 +1942,53 @@ When the buffer reaches its limit, backpressure prevent unlimited accumulation b
 When the suspension due to the backpressure is happen the resource stays open.
 
 > Suspension doesn't necessarily mean the resource is closed.
+
+**Limitation of buffering**  
+
+Suppose our producer is permanently faster than the consumer:  
+Producer: 10 chunks/sec, and consumer: 2 chunks/sec.  
+
+A buffer can absorb the difference temporarily but it wont make the rates equal. If the buffer is unbounded:  
+
+```text
+time →       1s   2s   3s   4s   5s
+produced     10   20   30   40   50
+consumed      2    4    6    8   10
+buffer        8   16   24   32   40
+```
+
+The buffer keeps growing.  
+
+If the buffer is bounded:
+
+```text
+Producer
+   ↓
+[ BUFFER ]
+   ↓
+Consumer
+```
+
+Eventually it becomes full, and backpressure forces the producer to wait. So buffering solves a temporary rate mismatch, not permanent one.  
+
+Suppose we are monitoring a temperature sensor that produce 10 readings per seconds, but our consumer process only 2 reading per second.  
+Since the goal is to know the current temperature, rather than preserve even historical reading. This called dropping data.  
+For example if the sensor produces readings `20`,`21`,`23`,`24` while the consumer is busy, keeping `24` and discarding the older readings may be sufficient. This is often called a **latest-value strategy**.
+
+**Latest-value strategy:** The system deliberately prioritizes the newest value over older, potentially stale values. It is useful when the consumer cares about the current state, not the complete history.
+
+**Buffering Strategies for Producer–Consumer Speed Mismatches:**
+
+- **Dropping data:** control resource usage by sacrificing some data, when the application can tolerate it. It doesn't specify which items must be discarded.
+- **Unbounded buffering:** preserve everything, but risk unbounded memory growth.
+- **Bounded buffering with backpressure:** preserve everything while slowing the producer when necessary.
+
+Why backpressure is safer for the LLM chunks than dropping chunks?  
+Because we want to preserve every chunk so that the consumer receives the complete response in the correct order. Dropping chunks can corrupt the output.
+
+The limitations of backpressure
+
+- Resource lifetime and cost: if the producer depends on an open connection to a paid API, slowing consumption can prolong the connection's lifetime and potentially increase cost depends on the service's billing model.
+- Latency: the consumer takes longer to finish, and the producer cannot progress freely.
+
+Backpressure does not inherently delay unrelated async tasks. While the producer is suspended at `await queue.put(chunk)`, the event loop can run other ready tasks. The problem is the backpressure cannot make the underlying work disappear. If the resource must remain open until streaming finishes, that resource stays occupied for longer.

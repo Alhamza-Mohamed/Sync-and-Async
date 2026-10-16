@@ -1790,10 +1790,8 @@ The execution of the function consume CPU computation, the event loop can't take
 **Streaming** means receiving or producing data progressively over time instead of waiting for the entire result to be available before receiving anything.  
 Streaming itself is not an async concept. We can have streaming without python `asyncio`, and we can have async code that is not streaming.
 
-Streaming describe how the data is delivered: " Don't wait for the complete result; deliver pieces as they become available."  
+Streaming describes how the data is delivered: " Don't wait for the complete result; deliver pieces as they become available."  
 Async describes how the program handles waiting and concurrency: "When I have to wait for the next piece, don't block the execution thread; suspend and let other work run."
-
-Streaming isn't necessarily means "many small pieces." A chunk could be a token, sentence, audio packet, database record, etc. The size and meaning of a chunk depends on the system.
 
 Suppose we have:
 
@@ -1811,7 +1809,7 @@ async for chunk in stream_data():
     print(chunk)
 ```
 
-What happen is when the consumer receives the first `chunk`,  the resource was acquired, the stream produced the first `chunk`, **and the resource is still held** because the stream is still active.  
+What happens is when the consumer receives the first `chunk`,  the resource was acquired, the stream produced the first `chunk`, **and the resource is still held** because the stream is still active.  
 Thats because the resource is still needed after receiving the first `chunk`.  
 
 When the stream is waiting for the next chunk the task can suspend:
@@ -1836,7 +1834,7 @@ process chunk 2
 
 So we have two different things happening simultaneously at the concept level:  
 
-- The resource life cycle: determine who long the underlying resource remains available.  
+- The resource life cycle: determine how long the underlying resource remains available.  
 - The stream: determines how data progressively moves through that resource.  
 
 And the task may repeatedly suspend while waiting for more data.  
@@ -1872,7 +1870,7 @@ resource is closed/released
 ```
 
 In the notebook `Streaming example 1`:  
-The end of the stream does no automatically mean the resource is closed.  
+The end of the stream does not automatically mean the resource is closed.  
 The stream ended first. Execution was still inside the `async with` block, so the resource remained available until the `async with` scope actually ended.
 
 ``` text
@@ -1892,17 +1890,6 @@ async with
 ```
 
 The `async with` owns the resource lifecycle; the stream uses the resource during part of that lifecycle.
-
-In the notebook `Streaming example 2: Another task while the steaming is waiting`:  
-
-The important part is the end: 
-
-```text
-Stream: END
-After async for
-```
-
-At this point, the stream has finished, but the resource is still open.
 
 **Streaming does not necessarily mean buffering.**  
 Consider if producer is generating chunks faster than the consumer can process them.  
@@ -1925,18 +1912,6 @@ processes A
 
 The producer doesn't necessarily have to stop immediately, and the consumer doesn't have to process everything at the exact moment it is produced.
 
-Streaming system can have:
-
-```python
-Resource
-   ↓
-Producer
-   ↓
-Buffer
-   ↓
-Consumer
-```
-
 When the buffer reaches its limit, backpressure prevent unlimited accumulation by making the producer slow down or wait.  
 
 When the suspension due to the backpressure is happen the resource stays open.
@@ -1948,7 +1923,7 @@ When the suspension due to the backpressure is happen the resource stays open.
 Suppose our producer is permanently faster than the consumer:  
 Producer: 10 chunks/sec, and consumer: 2 chunks/sec.  
 
-A buffer can absorb the difference temporarily but it wont make the rates equal. If the buffer is unbounded:  
+A buffer can absorb the difference temporarily but it won't make the rates equal. If the buffer is unbounded:  
 
 ```text
 time →       1s   2s   3s   4s   5s
@@ -1957,19 +1932,9 @@ consumed      2    4    6    8   10
 buffer        8   16   24   32   40
 ```
 
-The buffer keeps growing.  
+An unbounded buffer keeps growing if production persistently exceeds consumption.  
 
-If the buffer is bounded:
-
-```text
-Producer
-   ↓
-[ BUFFER ]
-   ↓
-Consumer
-```
-
-Eventually it becomes full, and backpressure forces the producer to wait. So buffering solves a temporary rate mismatch, not permanent one.  
+If the buffer is bounded, eventually it becomes full, and backpressure forces the producer to wait. So buffering solves a temporary rate mismatch, not permanent one.  
 
 Suppose we are monitoring a temperature sensor that produce 10 readings per seconds, but our consumer process only 2 reading per second.  
 Since the goal is to know the current temperature, rather than preserve even historical reading. This called dropping data.  

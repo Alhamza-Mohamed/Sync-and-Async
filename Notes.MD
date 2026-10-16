@@ -1957,3 +1957,89 @@ The limitations of backpressure
 - Latency: the consumer takes longer to finish, and the producer cannot progress freely.
 
 Backpressure does not inherently delay unrelated async tasks. While the producer is suspended at `await queue.put(chunk)`, the event loop can run other ready tasks. The problem is the backpressure cannot make the underlying work disappear. If the resource must remain open until streaming finishes, that resource stays occupied for longer.
+
+**Consumer failing**  
+
+Suppose the consumer raises an exception after second chunk:  
+
+```python 
+async with FakeResource() as resource:
+    producer = asyncio.create_task(producing(queue, resource))
+    consumer = asyncio.create_task(consuming(queue))
+
+    await producer
+    await consumer
+```
+
+1. The consumer task fails.
+2. The producer task is not automatically cancelled just because the consumer failed.
+3. The producer continue generating chunks and filling the bounded queue.
+4. Eventually, The queue becomes full, and the producer suspends at `await queue.put(chunk)`
+5. The producer can remain suspended indefinitely because the consumer is no longer removing items.
+
+This is **deadlock-like situation:** The producer is waiting for the consumer to free queue space, but the consumer has already failed.
+
+In notebook Example 2: consumer Task failing independently:  
+The consumer retrieves an item and raises an exception. ITs tasks finishes with an exception, but the producer task continues running independently.  
+The producer continues generating chunks and putting them into the bounded queue.
+
+Does `main()` reach `await consumer`?  
+No, the `main()` is still awaiting producer first:
+
+```python
+await producer
+await consumer
+```
+
+Since the producer gets stuck, `main` never reaches `await consumer`. THe consumer's exception is not automatically propagated to `main()` just because the task failed.  
+The `async` with block doesn't exit, and `FakeResource.__aexit__()` isn't called.
+
+Suppose the consumer fails, and we detect its exception, and we want to:
+
+1. Cancel the producer so it stops trying to generate chunks.
+2. Allow cancellation to propagate through the producer's coroutine and its async generator.
+3. Exit the `async with` block so `FakeResource.__aexit__()` runs.
+
+If we call `producer.cancel()` it request cancellation; it doesn't immediately terminate the task.  
+When producer reaches a cancellation point, such as an `await` that allows cancellation to be delivered, `asyncio.CancelledError` can be raised inside the producer coroutine.
+
+When running:  
+
+```python
+producer = asyncio.create_task(producing(queue, resource))
+consumer = asyncio.create_task(consuming(queue))
+```
+
+The `main()` needs a way to discover when one of them finishes.  
+
+There is three approaches:
+
+|Approach |Behavior|
+|:------|:-------|
+|`await producer`|Wait for the producer fo finish   |
+|`await asyncio.gather(producer, consumer)` |Await both together; bu default, propagate the first exception without automatically cancelling the other task |
+|`await asyncio.wait(...)` | Wait according to a specified completion condition, such as the first task finishing |
+
+The third approach is useful when the failure of noe task may require us to intervene while another task is still running.
+
+In example 4 using `asyncio.wait` to solve example 3 in notes:
+
+```python
+    done, pending = await asyncio.wait( 
+        {producer, consumer},
+        return_when = asyncio.FIRST_COMPLETED
+    )
+```
+
+- `asyncio.FIRST_COMPLETED`: the condition for returning.
+- `done`: a set of task that have finished, whether successfully or with an exception.
+- `pending`: a set of task that haven't finished yet.
+
+In our example, the consumer raises `TypeError`, so the consumer Task finishes with an exception, The producer is still running or stuck waiting for the queue space.
+
+Therefore, `asyncio.wait()` returns:
+
+- `consumer` is in `done`.
+- `producer` is in `pending`
+
+The failed task is still a completed tasK. That the central idea.

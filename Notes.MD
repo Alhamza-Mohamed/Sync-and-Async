@@ -1839,7 +1839,7 @@ So we have two different things happening simultaneously at the concept level:
 
 And the task may repeatedly suspend while waiting for more data.  
 
-The resource stays open while the task that uses it is suspended.  
+The resource stays open while its owning context is active (in our example it is the task that uses it is suspended). It closes when execution exits that context and cleanup runs.  
 Task suspension does not mean resource suspension or resource closer.  
 The resource is released/closed when the stream/lifecycle is finished, which may involve detecting end-of-stream and performing cleanup.
 
@@ -2012,15 +2012,15 @@ consumer = asyncio.create_task(consuming(queue))
 
 The `main()` needs a way to discover when one of them finishes.  
 
-There is three approaches:
+There are three approaches:
 
 |Approach |Behavior|
 |:------|:-------|
-|`await producer`|Wait for the producer fo finish   |
-|`await asyncio.gather(producer, consumer)` |Await both together; bu default, propagate the first exception without automatically cancelling the other task |
+|`await producer`|Wait for the producer to finish   |
+|`await asyncio.gather(producer, consumer)` |Await both together; by default, propagate the first exception without automatically cancelling the other task |
 |`await asyncio.wait(...)` | Wait according to a specified completion condition, such as the first task finishing |
 
-The third approach is useful when the failure of noe task may require us to intervene while another task is still running.
+The third approach is useful when the failure of one task may require us to intervene while another task is still running.
 
 In example 4 using `asyncio.wait` to solve example 3 in notes:
 
@@ -2043,3 +2043,35 @@ Therefore, `asyncio.wait()` returns:
 - `producer` is in `pending`
 
 The failed task is still a completed tasK. That the central idea.
+
+**Producer failing**  
+
+Suppose `resource.stream()` raises an `OSError` while reading chunk `2`.  
+
+```python
+    done, pending = await asyncio.wait( 
+        {producer, consumer},
+        return_when = asyncio.FIRST_COMPLETED
+    )
+```
+
+If the producer fails first, it will be in `done`, and the consumer will likely be in pending. We are going to use the same technique used with the failed consumer.
+
+```python
+        # Handle producer failure
+        if producer in done and producer.exception() is not None and consumer in pending:
+            consumer.cancel()
+
+            try:
+                await consumer
+            except asyncio.CancelledError:
+                print("ERROR: Producer failed")
+                print("CONSUMER: cancellation completed")
+
+```
+
+When the producer is failed it will be stored in `done` but it will have an exception so `producer.exception()` will have value.  
+In `task.exception()` if the task the completed successfully, `task.exception()` returns `None` so the condition will be false. If the task raised an exception, `task.exception()` returns exception so the condition is True
+
+To handle more edge cases we should make sure that the consumer is not finished before the producer so its cancellation will not be meaning less, so we are going to check if the consumer is still not finished or not by checking `consumer in pending`
+

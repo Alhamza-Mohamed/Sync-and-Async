@@ -57,7 +57,7 @@ Python isn't doing hte work, the remote server is. Python is just waiting.
 
 A task is CPU bound when the processor is actively doing calculations. i.e. Tasks use the processor heavily.
 
-Example:
+**Example**:
 
 - Training a neural network.
 - Matrix multiplication.
@@ -69,7 +69,7 @@ Example:
 
 Task that spend most of its time waiting for input or output.
 
-Example:
+**Example**:
 
 - HTTP requests.
 - Database queries.
@@ -277,7 +277,7 @@ Thread
 
 The thread needs t keep track of where each task currently is.
 
-Example:
+**Example**:
 
 ```text
 Task A:
@@ -343,7 +343,7 @@ Process
 
 While thread provides the execution context. The event loop is the scheduler that manages the async tasks.
 
-Example
+**Example**
 
 ``` text
 Thread
@@ -386,7 +386,7 @@ The CPU executes instruction.
 The thread is the execution context running those instructions.  
 The even loop;o manages which async task gets that execution opportunity.  
 
-**Example on how even loop work:**
+****Example** on how even loop work:**
 
 ``` text
 A → waiting for database
@@ -485,7 +485,7 @@ execution begins
 
 calling an async function creates a coroutine object, it does note execute the coroutine body. The  coroutine must later must be awaited or scheduled for execution.
 
-For example:
+**Example**:
 
 ``` python
 coro = fetch_data()
@@ -1100,7 +1100,7 @@ file.close()
 The life cycle is acquire resource -> use it -> release resource.
 The problem is what happens if something goes wrong while using it?
 
-Example:
+**Example**:
 
 ```python
 file = open("data.txt")
@@ -1139,7 +1139,7 @@ So, it:
 **Why is leaving a resource open actually a problem?**  
 Because a resource usually represents  something that the operating system, a server, or another system is actively keeping track of.
 
-Example for a file, if you do `f = open("data.txt")` python doesn't merely create a python object. It asks the operating system to open the file and gives your process access to that OS-level resource.  
+**Example** for a file, if you do `f = open("data.txt")` python doesn't merely create a python object. It asks the operating system to open the file and gives your process access to that OS-level resource.  
 
 So if the file was never closed, that OS resource can remain allocated. For a single file, we might not notice anything but imagine doing this for thousands of files. 
 
@@ -1168,7 +1168,7 @@ In this case the lock will never got released so another task/thread might wait 
 
 **Lock:** it is a synchronization mechanism used when multiple concurrent pieces of code need to access something shared. The lock provides a way of allowing one piece of code to access shared thing.
 
-Example: 2 tasks (A,B) accessing the same shared variable `balance = 100` task A: withdraw 80, task B: withdraw 50. Without some coordination both could observe `balance = 100` and before either one updates it they both read it in the same time resulting in a wrong final value calculation:
+**Example**: 2 tasks (A,B) accessing the same shared variable `balance = 100` task A: withdraw 80, task B: withdraw 50. Without some coordination both could observe `balance = 100` and before either one updates it they both read it in the same time resulting in a wrong final value calculation:
 
 ```text
 Task A: reads balance → 100
@@ -1710,7 +1710,7 @@ If the awaited operation is already complete, the coroutine may continue without
 The principle that the two example are illustrate is: `async with` does not transform the code inside the block into asynchronous code.  
 The code inside the block is still synchronous unless that code itself performs asynchronous operations, such as `await`.
 
-Example
+**Example**
 
 ```python
 class AsyncResource:
@@ -1938,7 +1938,8 @@ If the buffer is bounded, eventually it becomes full, and backpressure forces th
 
 Suppose we are monitoring a temperature sensor that produce 10 readings per seconds, but our consumer process only 2 reading per second.  
 Since the goal is to know the current temperature, rather than preserve even historical reading. This called dropping data.  
-For example if the sensor produces readings `20`,`21`,`23`,`24` while the consumer is busy, keeping `24` and discarding the older readings may be sufficient. This is often called a **latest-value strategy**.
+
+**For example** if the sensor produces readings `20`,`21`,`23`,`24` while the consumer is busy, keeping `24` and discarding the older readings may be sufficient. This is often called a **latest-value strategy**.
 
 **Latest-value strategy:** The system deliberately prioritizes the newest value over older, potentially stale values. It is useful when the consumer cares about the current state, not the complete history.
 
@@ -1979,7 +1980,7 @@ async with FakeResource() as resource:
 
 This is **deadlock-like situation:** The producer is waiting for the consumer to free queue space, but the consumer has already failed.
 
-In notebook Example 2: consumer Task failing independently:  
+In notebook **Example** 2: consumer Task failing independently:  
 The consumer retrieves an item and raises an exception. ITs tasks finishes with an exception, but the producer task continues running independently.  
 The producer continues generating chunks and putting them into the bounded queue.
 
@@ -2074,4 +2075,39 @@ When the producer is failed it will be stored in `done` but it will have an exce
 In `task.exception()` if the task the completed successfully, `task.exception()` returns `None` so the condition will be false. If the task raised an exception, `task.exception()` returns exception so the condition is True
 
 To handle more edge cases we should make sure that the consumer is not finished before the producer so its cancellation will not be meaning less, so we are going to check if the consumer is still not finished or not by checking `consumer in pending`
+
+**Pull-based streaming vs. push-based streaming**  
+
+1- **Pull-based streaming**  
+
+Consider async generator:  
+
+```python
+async def stream():
+    for i in range(5):
+        await asyncio.sleep(1)
+        yield i
+```
+
+and its consumer:
+
+```python
+async for chunk in stream():
+    await process(chunk)
+```
+
+The consumer controls the pace of iteration. It request a chunk, receives it, process it, and then requests the next one.  
+If `process(chunk)` takes two seconds, the generator doesn't independently continue producing chunks in hte background. It resumes when the consumer requests the next item.  
+
+This **pull-based streaming**: the consumer puls data from the source.
+
+2- **Push-based streaming**
+
+Imagine an external system that sends events to your application whenever new data becomes available. Your application does not explicitly request each individual event; the source delivers events to a callback, queue, or other receiving mechanism.
+
+**Example**, a notification service might push incoming events to your application as they arrive.  
+The source controls when new events are delivered, while your application must decide how to handle them.
+
+Important distinction: Push-based doesn't automatically mean asynchronous, and pull-based doesn't automatically mean synchronous.  
+These terms describe how data is delivered, not whether the code uses `async` and `await`.
 

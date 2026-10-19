@@ -2111,3 +2111,80 @@ The source controls when new events are delivered, while your application must d
 Important distinction: Push-based doesn't automatically mean asynchronous, and pull-based doesn't automatically mean synchronous.  
 These terms describe how data is delivered, not whether the code uses `async` and `await`.
 
+**Durability and reliable message processing**  
+
+**Example**: suppose an external service push 100 events per second, while the consumer can only process 20 per second  and the service cannot be slowed down.  
+
+If the source cannot slow down and hte consumer is permanently slower; the system has a fundamental throughput mismatch.  
+If the last few events are more important then we could use dropping data. A bounded queue with backpressure works only if the source can actually be slowed down or paused.  
+If every event must be preserved and the source cannot pause, alternatives include durable storage, a message broker, or scaling up the consumer capacity. These approaches still require sufficient storage or processing capacity; no buffering strategy can eliminate a permanent rate mismatch for free.
+
+**Durability**: means that the data is stored in a way that allows it to survive the relevant failures, such as an application crash or restart. That exact guarantees depend on how and where the data is stored.
+
+**Example**, instead of keeping and important event only in RAM, an application could save it to a file or a database on persistent storage. After restarting, it could read the saved event and continue processing it.
+
+This is the idea of **durable storage**: data isn't dependent solely on the lifetime of the python process.
+
+Note: saving an event does not automatically mean it has been processed. Storage and processing are separate stages.
+
+In python, when a process terminates, its in-memory queue disappears. if those events weren't saved somewhere else, they can't be recovered from that queue after a restart.
+
+**Message broker**: an intermediary system that accepts messages from producers and makes them available to consumers.  
+It allows producers and consumers to operate more independently, the producer doesn't necessarily need to wait for the consumer to precess each message before sending the next one.
+
+**Example**s of message brokers: RabbitMQ and Apache Kafka.
+
+Note: a broker doesn't automatically guarantee preservation under every failure.  
+Its durability configuration, replication and acknowledgement behavior matter.  
+Also if the consumer crashes after performing an operation but before acknowledging its message, that message may be delivered again.
+
+- **Durability**: preserve messages across relevant failures.
+- **Acknowledgements** (ACKs): Tell the broker that a message has been handled.
+- **Idempotency**: Prevent repeated requests from producing repeated effects.
+
+```text
+Producer
+(Publishes payment request)
+        ↓
+Durable message broker
+(Retains messages and manages delivery)
+        ↓
+Consumer
+(Receives and processes the request)
+        ↓
+Payment provider
+(Executes the payment using an idempotency key)
+        ↓
+ACK to broker
+(Sent after the consumer reaches the appropriate success point)
+```
+
+**Recall our scenario:** the producer generates 100 events per second, while the consumer process only 20 events per second. Every event matter, and the producer cannot pause.
+
+Option A: unbounded `asyncio.Queue:
+
+```text
+Producer (100 events/sec)
+        ↓
+In-memory queue (+80 events/sec)
+        ↓ 
+Consumer (20 events/sec)
+```
+
+The queue preserves the events while the process is running, but memory usage grows continuously. If the process crashes, queued events are lost unless they were preserved elsewhere.
+
+Option B: durable message broker:
+
+```text
+Producer (100 events/sec)
+        ↓
+Message broker
+(Stores messages persistently and manages delivery , +80 events/sec)
+        ↓ 
+Consumer (20 events/sec)
+```
+
+The broker can preserve messages across consumer crashes and restarts, subject to its durability and delivery configuration.  
+It also separates the producer and consumer into independently operating components.
+
+**Notice:** The broker does not solve the throughput mismatch by itself. The backlog still grows by 80 events per second it changes where and how messages are stored, and how they survive failures.

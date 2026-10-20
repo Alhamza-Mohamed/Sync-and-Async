@@ -22,6 +22,7 @@
     - [Async context managers](#async-context-managers)
     - [Async Context Manager with a Network Resource](#async-context-manager-with-a-network-resource)
     - [Async streaming](#async-streaming)
+    - [Common async mistake](#common-async-mistake)
 
 # Sync and Async
 
@@ -64,6 +65,7 @@ A task is CPU bound when the processor is actively doing calculations. i.e. Task
 - Image processing.
 - Video encoding.
 - Large numerical computations.
+
 
 ### I/O bound
 
@@ -386,7 +388,7 @@ The CPU executes instruction.
 The thread is the execution context running those instructions.  
 The even loop;o manages which async task gets that execution opportunity.  
 
-****Example** on how even loop work:**
+**Example** on how even loop work:**
 
 ``` text
 A → waiting for database
@@ -2188,3 +2190,49 @@ The broker can preserve messages across consumer crashes and restarts, subject t
 It also separates the producer and consumer into independently operating components.
 
 **Notice:** The broker does not solve the throughput mismatch by itself. The backlog still grows by 80 events per second it changes where and how messages are stored, and how they survive failures.
+
+### Common async mistake
+
+**Blocking the event loop accidentally**  
+
+In **Example 1**: async task with no suspension:  
+`time.sleep(3)` does not suspend task a,; it blocks the thread running the event loop.  
+Even task B is ready to run it cannot start during that time.  
+Only after the blocking sleep finished, task A prints `A: finished`. The event loop can then run task B, which prints `B: started` and awaits `asyncio.sleep(1)`.  
+After task B's one-second asynchronous sleep, it prints `B:finished`.
+
+**Example** suppose async FastAPI endpoint:
+
+``` python
+async def endpoint():
+    result = calculate_something()
+    return result
+```
+
+Assume `calculate_something` takes 3 seconds to execute and performs CPU-heavy computation without yielding control.  
+This is CPU-bound synchronous function that runs for three seconds without yielding control will block the event-loop for those three seconds, even when called inside an `async def` function.
+
+For CPU-heavy work, there are two common options:
+
+- **Treads**: Run the work in a separate thread so the event-loop thread can continue. This can help responsiveness, although python GIL can limit parallel execution of CPU-bound python code.
+- **Processes**: Run the work in another process, allowing CPU-bound python code to execute in parallel on multiple CPU cores.
+
+So if we change that endpoint to:
+
+```python
+async def endpoint():
+    result = await asyncio.to_thread(calculate_something)
+    return result
+```
+
+While the CPU-heavy function is executing in the worker thread, the event loop can run other tasks on its own thread, thats because both run on 2 independent threads.
+
+What happens:
+
+1. The event loop executes `endpoint()`.
+2. `await asyncio.to_thread(calculate_something) submits the synchronous function to a worker thread.
+3. The endpoint's task suspends while waiting for the result.
+4. The event loop's thread remains free to run other ready tasks.
+5. After the computation finishes, the result becomes available, and the endpoint can resume.
+
+**Important note:** The event loop isn't necessarily running another task continuously. It can run other ready tasks whenever scheduling permits.

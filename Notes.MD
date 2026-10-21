@@ -2236,3 +2236,40 @@ What happens:
 5. After the computation finishes, the result becomes available, and the endpoint can resume.
 
 **Important note:** The event loop isn't necessarily running another task continuously. It can run other ready tasks whenever scheduling permits.
+
+**Creating tasks without properly managing them**  
+
+In Example 1 Fire-and-Forget Task:  
+
+`Result saved` will not always be printed.  
+After asyncio.create_task(save_result()), the new task is scheduled to run, but creating it doesn't mean it has already executed.  
+Meanwhile, `main()` can finish immediately after printing `"Request completed"`.
+
+**What happens when `main()` finishes?**  
+Calling `asyncio.create_task(save_result())` schedules a separate task. The task is owned by the event loop not owned by the life time of `main()` in the sense that it automatically finishes when `main()` finishes.  
+
+In the Jupyter notebook:
+
+- After `main()` finishes `await main()` return the control to the event loop.  
+- The event loop continue to exist, so the background task may continue running.
+- If the event loop shuts down, pending tasks my be cancelled during shutdown.
+
+Therefore, the task might finish successfully after `main()` returns or it might not. The exact outcome depends on what happens next in the environment.
+
+**Why is this risky in production**  
+Because the code has no explicit guarantee that the operation completes or that its failure is observed.  
+If saving the result is essential, returning a successful response before the save completes could have application reporting success when the data was never persisted.
+
+**In Example 2**: Fire-and-Forget Task:  
+`print(task.done())` output `False` as at the moment `task.done()` is evaluated, the Task hasn't completed.
+
+**Important distinction:** a task can outlive the coroutine that created it, but that doesn't guarantee it will outlive the event loop.
+
+In endpoints that do behavior like save answer to database:  
+It is better to use `await save_result()` that return only after the save finishes over `asyncio.create_task(save_result())` that return the response immediately.  
+Because `await save_result()` establishes a **completion guarantee**: the end point won't proceed past that `await` until the save operation finishes successfully or raises an exception.
+
+**In Example 3:** await task:  
+Notice that creating a task and awaiting it are two separate decision. You can schedule work to run concurrently with other work, then wait for its result when it is necessary.
+
+Also if `save_result()` raises an exception, `await task` propagates that exception to `main()`. The save failure won't simply be hidden from the caller.

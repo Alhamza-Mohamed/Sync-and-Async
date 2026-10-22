@@ -26,6 +26,7 @@
       - [Blocking the event loop accidentally](#blocking-the-event-loop-accidentally)
       - [Creating tasks without properly managing them](#creating-tasks-without-properly-managing-them)
       - [Losing track of a task's exceptions](#losing-track-of-a-tasks-exceptions)
+      - [Retrieving exceptions without awaiting immediately](#retrieving-exceptions-without-awaiting-immediately)
       - [Assuming `async def` makes a function non-blocking automatically](#assuming-async-def-makes-a-function-non-blocking-automatically)
       - [Forgetting to await a coroutine](#forgetting-to-await-a-coroutine)
 
@@ -2357,7 +2358,7 @@ async def main():
 
 The `ValueError` won't automatically propagate out of `await main()` since `main()` does not await that task or other wise retrieve its exception, the exception won't automatically propagate through `await main()`.
 
-**Retrieving exceptions without awaiting immediately**  
+#### Retrieving exceptions without awaiting immediately
 
 Sometimes you want a task to run the background while other work proceeds. You may not want to await it immediately, but you still need to observe whether it succeeded or failed.  
 
@@ -2460,8 +2461,42 @@ await main()
 #### Forgetting to await a coroutine  
 
 In **Example 1: calling async function without await**:  
+
+```python
+async def fetch_data():
+    print("Fetching data")
+    return "data"
+
+async def main():
+    result = fetch_data()
+    print(result)
+```
+
 When calling an `async def` function without `await`, you create a coroutine object but you don't execute the coroutine body.
 
 In **Example 3: calling a function in different task**:  
+
+```python
+async def fetch_data():
+    print("Fetching data")
+    return "data"
+
+async def main():
+    result = asyncio.create_task(fetch_data())
+    print(result)
+```
+
 When calling `asyncio.create_task(fetch_data())`, the coroutine is scheduled to run independently. It doesn't need to be awaited to start executing.
+
+The `main()` does not yield control after creating the task. It prints the task representation and returns.  
+The event loop then gets an opportunity to run the scheduled task so `"Fetching data"` will normally appear afterward.
+
+Also `"data"` is not printed as `"data"` is returned value.  
+while `"Fetching data"` will be printed because `print("Fetching data")` is executed inside the coroutine.
+
+The distinction:
+
+- calling `fetching_data()` alone creates a coroutine object.
+- `asyncio.create_task(fetch_data())` schedules that coroutine to run. When it executes, `print("Fetching data")` displays the message, and `return "data"` supplies the string as the coroutine result.
+- `await task` waits for the task to finish and retrieves that result, allowing you to assign it to a variable or print it.
 

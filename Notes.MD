@@ -23,6 +23,11 @@
     - [Async Context Manager with a Network Resource](#async-context-manager-with-a-network-resource)
     - [Async streaming](#async-streaming)
     - [Common async mistake](#common-async-mistake)
+      - [Blocking the event loop accidentally](#blocking-the-event-loop-accidentally)
+      - [Creating tasks without properly managing them](#creating-tasks-without-properly-managing-them)
+      - [Losing track of a task's exceptions](#losing-track-of-a-tasks-exceptions)
+      - [Assuming `async def` makes a function non-blocking automatically](#assuming-async-def-makes-a-function-non-blocking-automatically)
+      - [Forgetting to await a coroutine](#forgetting-to-await-a-coroutine)
 
 # Sync and Async
 
@@ -2195,10 +2200,26 @@ It also separates the producer and consumer into independently operating compone
 
 ### Common async mistake
 
-**Blocking the event loop accidentally**  
+#### Blocking the event loop accidentally
 
-In **Example 1**: async task with no suspension:  
-`time.sleep(3)` does not suspend task a,; it blocks the thread running the event loop.  
+In **Example 1: async task with no suspension**:  
+
+```python
+async def task_a():
+    print("A: started")
+    time.sleep(3) # Doesn't suspend task A
+    print("A: finished")
+
+async def task_b():
+    print("B: started")
+    await asyncio.sleep(1)
+    print("B: finished")
+
+async def main():
+    await asyncio.gather(task_a(),task_b())
+```
+
+`time.sleep(3)` does not suspend task a; it blocks the thread running the event loop.  
 Even task B is ready to run it cannot start during that time.  
 Only after the blocking sleep finished, task A prints `A: finished`. The event loop can then run task B, which prints `B: started` and awaits `asyncio.sleep(1)`.  
 After task B's one-second asynchronous sleep, it prints `B:finished`.
@@ -2239,13 +2260,24 @@ What happens:
 
 **Important note:** The event loop isn't necessarily running another task continuously. It can run other ready tasks whenever scheduling permits.
 
-**Creating tasks without properly managing them**  
+#### Creating tasks without properly managing them
 
 **In Example 1 Fire-and-Forget Task:**  
 
-`Result saved` will not always be printed.  
+```python
+async def save_result():
+    print("Save: started")
+    await asyncio.sleep(2)
+    print("Save: completed")
+
+async def main():
+    task = asyncio.create_task(save_result())
+    print("Main: completed")
+```
+
+`Save: completed` will not always be printed.  
 After asyncio.create_task(save_result()), the new task is scheduled to run, but creating it doesn't mean it has already executed.  
-Meanwhile, `main()` can finish immediately after printing `"Request completed"`.
+Meanwhile, `main()` can finish immediately after printing `"Main: completed"`.
 
 **What happens when `main()` finishes?**  
 Calling `asyncio.create_task(save_result())` schedules a separate task. The task is owned by the event loop not owned by the life time of `main()` in the sense that it automatically finishes when `main()` finishes.  
@@ -2258,11 +2290,24 @@ In the Jupyter notebook:
 
 Therefore, the task might finish successfully after `main()` returns or it might not. The exact outcome depends on what happens next in the environment.
 
-**Why is this risky in production**  
+**Why is this risky in production?**  
 Because the code has no explicit guarantee that the operation completes or that its failure is observed.  
 If saving the result is essential, returning a successful response before the save completes could have application reporting success when the data was never persisted.
 
 **In Example 2: Fire-and-Forget **Task**:  
+
+```python
+async def save_result():
+    print("Save: started")
+    await asyncio.sleep(2)
+    print("Save: completed")
+
+async def main():
+    task = asyncio.create_task(save_result())
+    print("Main: completed")
+    return task
+```
+
 `print(task.done())` output `False` as at the moment `task.done()` is evaluated, the Task hasn't completed.
 
 **Important distinction:** a task can outlive the coroutine that created it, but that doesn't guarantee it will outlive the event loop.
@@ -2272,13 +2317,43 @@ It is better to use `await save_result()` that return only after the save finish
 Because `await save_result()` establishes a **completion guarantee**: the end point won't proceed past that `await` until the save operation finishes successfully or raises an exception.
 
 **In Example 3: await **task**:  
+
+```python
+async def save_result():
+    print("Save: started")
+    await asyncio.sleep(2)
+    print("Save: completed")
+
+
+async def main():
+    task = asyncio.create_task(save_result()) 
+    print("Main: waiting")
+    await task # suspends main() until that task finishes
+    print("Main: completed")
+
+await main()
+print(task.done())
+```
+
 Notice that creating a task and awaiting it are two separate decision. You can schedule work to run concurrently with other work, then wait for its result when it is necessary.
 
 Also if `save_result()` raises an exception, `await task` propagates that exception to `main()`. The save failure won't simply be hidden from the caller.
 
-**Losing track of a task's exceptions**  
+#### Losing track of a task's exceptions
+
+Suppose a background operation fails, but nobady awaits its task or retrieves its exception, Python's asyncio may eventually report a warning such as `Task exception was never retrieved`.
 
 In **Example 1: task fails in the **background**:  
+
+```python
+async def background_work():
+    await asyncio.sleep(1)
+    raise ValueError("Something went wrong!")
+
+async def main():
+    asyncio.create_task(background_work())
+    print("Main completed")
+```
 
 The `ValueError` won't automatically propagate out of `await main()` since `main()` does not await that task or other wise retrieve its exception, the exception won't automatically propagate through `await main()`.
 
@@ -2290,9 +2365,42 @@ Asyncio tasks provide methods as `task.done()` and `task.exception()` for inspec
 
 In **Example 1: independent task failure**:  
 
+```python
+import asyncio
+
+async def background_work():
+    await asyncio.sleep(1)
+    raise ValueError("Something went wrong!")
+
+async def main():
+    task = asyncio.create_task(background_work())
+
+    await asyncio.sleep(2)
+
+    print("Main continues")
+    print(task.done())
+    print(type(task.exception()).__name__)
+```
+
 The background task runs independently. If it raises `ValueError`, the failure does not automatically propagate into `main()`. The main coroutine can continue and finish normally.
 
 In **Example 2: await the task**:  
+
+```python
+async def background_work():
+    await asyncio.sleep(1)
+    raise ValueError("Something went wrong!")
+
+async def main():
+    task = asyncio.create_task(background_work())
+
+    await asyncio.sleep(2)
+    await task
+
+    print("Main continues")
+    print(task.done())
+    print(type(task.exception()).__name__)
+```
 
 We added `await task` so if background task raises `ValueError`, the exception propagates through `await task`.  
 Unless we catch it, `main()` exist with that exception, and `Main continues` is never printed
@@ -2308,6 +2416,15 @@ without awaiting, the failure remains in the background Task unless something el
 
 In **Example 3: Checking Task Completion and Exception Availability**:  
 
+```python
+async def main():
+    task = asyncio.create_task(background_work())
+
+    # Note there is no yielding control back to the event loop (await asyncio.sleep(2) )
+    print(task.done()) 
+    print(task.exception()) 
+```
+
 `asyncio.create_task()` schedules the coroutine; but it doesn't guarantee that the task executed.  
 Since `main()` hasn't yielded control to the event loop, `background_work()` hasn't had an opportunity to finish.
 
@@ -2317,4 +2434,34 @@ At this point:
 - `task.exception()` raises `asyncio.InvalidStateError` because the task hasn't finished yet.
 
 Notice that `task.exception()` doesn't mean "tell me whether an exception might happen." it means "retrieve the exception from this completed task."
+
+#### Assuming `async def` makes a function non-blocking automatically
+
+Async functions can be blocked by having blocking calls such as `time.sleep()` inside asynchronous functions.
+
+In **Example 1: blocking async function**:  
+
+```python
+import asyncio
+import time
+
+async def  fetch_data():
+    time.sleep(2)
+    print("data")
+
+
+async def main():
+    task = asyncio.create_task(fetch_data())
+    await asyncio.sleep(0)
+    print("Main continues")
+await main()
+```
+
+#### Forgetting to await a coroutine  
+
+In **Example 1: calling async function without await**:  
+When calling an `async def` function without `await`, you create a coroutine object but you don't execute the coroutine body.
+
+In **Example 3: calling a function in different task**:  
+When calling `asyncio.create_task(fetch_data())`, the coroutine is scheduled to run independently. It doesn't need to be awaited to start executing.
 

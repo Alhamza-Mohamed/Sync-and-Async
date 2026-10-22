@@ -2191,6 +2191,8 @@ It also separates the producer and consumer into independently operating compone
 
 **Notice:** The broker does not solve the throughput mismatch by itself. The backlog still grows by 80 events per second it changes where and how messages are stored, and how they survive failures.
 
+---
+
 ### Common async mistake
 
 **Blocking the event loop accidentally**  
@@ -2279,4 +2281,40 @@ Also if `save_result()` raises an exception, `await task` propagates that except
 In **Example 1: task fails in the **background**:  
 
 The `ValueError` won't automatically propagate out of `await main()` since `main()` does not await that task or other wise retrieve its exception, the exception won't automatically propagate through `await main()`.
+
+**Retrieving exceptions without awaiting immediately**  
+
+Sometimes you want a task to run the background while other work proceeds. You may not want to await it immediately, but you still need to observe whether it succeeded or failed.  
+
+Asyncio tasks provide methods as `task.done()` and `task.exception()` for inspecting their state.
+
+In **Example 1: independent task failure**:  
+
+The background task runs independently. If it raises `ValueError`, the failure does not automatically propagate into `main()`. The main coroutine can continue and finish normally.
+
+In **Example 2: await the task**:  
+
+We added `await task` so if background task raises `ValueError`, the exception propagates through `await task`.  
+Unless we catch it, `main()` exist with that exception, and `Main continues` is never printed
+
+So `await` does 2 important things:
+
+1. It suspends the current coroutine until the awaited operation completes, allowing the event loop to run other tasks.
+2. It delivers the awaited operation's result to the current coroutine, or propagates its exception into that coroutine.
+
+Awaiting task doesn't create the error or make the task fail. The task fails independently; awaiting makes that failure propagate into the awaiting coroutine.
+
+without awaiting, the failure remains in the background Task unless something else retrieves or handles it; with awaiting, the failure propagates to the caller
+
+In **Example 3: Checking Task Completion and Exception Availability**:  
+
+`asyncio.create_task()` schedules the coroutine; but it doesn't guarantee that the task executed.  
+Since `main()` hasn't yielded control to the event loop, `background_work()` hasn't had an opportunity to finish.
+
+At this point:
+
+- `task.done()` returns `False`.
+- `task.exception()` raises `asyncio.InvalidStateError` because the task hasn't finished yet.
+
+Notice that `task.exception()` doesn't mean "tell me whether an exception might happen." it means "retrieve the exception from this completed task."
 

@@ -29,6 +29,7 @@
       - [Retrieving exceptions without awaiting immediately](#retrieving-exceptions-without-awaiting-immediately)
       - [Assuming `async def` makes a function non-blocking automatically](#assuming-async-def-makes-a-function-non-blocking-automatically)
       - [Forgetting to await a coroutine](#forgetting-to-await-a-coroutine)
+      - [Assuming `asyncio.gather()` automatically cancel all other operations when one fails](#assuming-asynciogather-automatically-cancel-all-other-operations-when-one-fails)
 
 # Sync and Async
 
@@ -821,9 +822,9 @@ The task becomes cancelled only after the coroutine actually respond to the canc
 
 > **Coroutine can handle the cancellation or terminate**
 
-Because this is exactly what you are going to discover in your notebook. A coroutine can catch  `CancelledError`, perform cleanup, and potentially even suppress the cancellation.
+A coroutine can catch  `CancelledError`, perform cleanup, and potentially even suppress the cancellation.
 
-`gather` with `cancel()`
+**`gather` with `cancel()`**  
 
 Suppose having a task that is a gathering of 2 async functions, cancelling the gathered task will cancel both of the functions as the `gather()` operation itself is being cancelled.
 
@@ -2500,3 +2501,14 @@ The distinction:
 - `asyncio.create_task(fetch_data())` schedules that coroutine to run. When it executes, `print("Fetching data")` displays the message, and `return "data"` supplies the string as the coroutine result.
 - `await task` waits for the task to finish and retrieves that result, allowing you to assign it to a variable or print it.
 
+#### Assuming `asyncio.gather()` automatically cancel all other operations when one fails
+
+`asyncio.gather()` propagates the first ordinary exception it encounters to the awaiting coroutine immediately by default.  
+It does not wait for all other awaitables to finish, and does not automatically cancel the remaining ones.  
+
+It is important to distinct between the behavior of `asyncio.gather()` when a child coroutine is being cancelled and a child coroutine rasing an ordinary exception.
+
+- Ordinary exception: `asyncio.gather()` propagates the first ordinary exception to its awaiter without automatically cancelling the other children.
+- Child cancellation: `gather()` propagates CancelledError to its awaiter without automatically cancelling the other children.
+- `return_exceptions=True`: Exceptions and child cancellations are returned as result entries.
+- Gather cancellation: Cancelling `gather()` itself cancels unfinished submitted awaitables.

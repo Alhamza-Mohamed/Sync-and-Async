@@ -30,6 +30,8 @@
       - [Assuming `async def` makes a function non-blocking automatically](#assuming-async-def-makes-a-function-non-blocking-automatically)
       - [Forgetting to await a coroutine](#forgetting-to-await-a-coroutine)
       - [Assuming `asyncio.gather()` automatically cancel all other operations when one fails](#assuming-asynciogather-automatically-cancel-all-other-operations-when-one-fails)
+      - [Assuming cancelling one child of `asyncio.gather()`cancels its siblings](#assuming-cancelling-one-child-of-asynciogathercancels-its-siblings)
+      - [Assuming cancelling `gather()` does not cancel its unfinished children](#assuming-cancelling-gather-does-not-cancel-its-unfinished-children)
 
 # Sync and Async
 
@@ -2506,9 +2508,35 @@ The distinction:
 `asyncio.gather()` propagates the first ordinary exception it encounters to the awaiting coroutine immediately by default.  
 It does not wait for all other awaitables to finish, and does not automatically cancel the remaining ones.  
 
-It is important to distinct between the behavior of `asyncio.gather()` when a child coroutine is being cancelled and a child coroutine rasing an ordinary exception.
+It is important to distinct between the behavior of `asyncio.gather()` when a child awaitable is cancelled and a child coroutine rasing an ordinary exception.
 
 - Ordinary exception: `asyncio.gather()` propagates the first ordinary exception to its awaiter without automatically cancelling the other children.
 - Child cancellation: `gather()` propagates CancelledError to its awaiter without automatically cancelling the other children.
 - `return_exceptions=True`: Exceptions and child cancellations are returned as result entries.
 - Gather cancellation: Cancelling `gather()` itself cancels unfinished submitted awaitables.
+
+#### Assuming cancelling one child of `asyncio.gather()`cancels its siblings
+
+If a child task submitted to `asyncio.gather()` is cancelled, `gather()` propagates `CancelledError` to its awaiter but does not automatically cancel the other children.  
+They continue running unless cancelled separately.
+
+#### Assuming cancelling `gather()` does not cancel its unfinished children
+
+If the coroutine awaiting `asyncio.gather()` is cancelled, that cancellation propagates to the `gather()` operation, which then cancels its unfinished child awaitables.
+
+```python
+async def main():
+    group = asyncio.gather(work_a(), work_b())
+
+    # If main() is cancelled while awaiting group:
+    await group
+```
+
+If `main()` is cancelled while awaiting `group`, the cancellation propagates to `group`, which cancels unfinished children.
+
+**Remember:**
+
+- Cancelling a child is different from cancelling the `gather()` operation itself.
+- A child raises an ordinary exception → siblings are not automatically cancelled.
+- A child is cancelled → `gather()` itself is not automatically cancelled.
+- The caller cancels `gather()` → unfinished children are cancelled.

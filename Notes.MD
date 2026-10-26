@@ -15,6 +15,7 @@
   - [Async in python](#async-in-python)
     - [`await` vs `asyncio.create_task`](#await-vs-asynciocreate_task)
     - [`asyncio.gather()`](#asynciogather)
+    - [Events](#events)
     - [Timeouts](#timeouts)
     - [Async generators and streaming](#async-generators-and-streaming)
     - [Context managers](#context-managers)
@@ -32,6 +33,7 @@
       - [Assuming `asyncio.gather()` automatically cancel all other operations when one fails](#assuming-asynciogather-automatically-cancel-all-other-operations-when-one-fails)
       - [Assuming cancelling one child of `asyncio.gather()`cancels its siblings](#assuming-cancelling-one-child-of-asynciogathercancels-its-siblings)
       - [Assuming cancelling `gather()` does not cancel its unfinished children](#assuming-cancelling-gather-does-not-cancel-its-unfinished-children)
+    - [Async debugging and failure diagnosis](#async-debugging-and-failure-diagnosis)
 
 # Sync and Async
 
@@ -877,6 +879,16 @@ gather cancels its children
     ↓
 A + B are cancelled
 ```
+
+### Events
+
+`asyncio.Event()` is an object that lets one coroutine signal to other coroutines that something has happened. It is like a shared flag.
+
+It has three important operations:
+
+- `event.set()`: sets the flag to `True` and wakes up coroutines waiting for it.
+- `event.clear()`: resets flag to `False`.
+- `await event.wait()`: suspends the current coroutine until the flag becomes `True`.
 
 ### Timeouts
 
@@ -2540,3 +2552,5 @@ If `main()` is cancelled while awaiting `group`, the cancellation propagates to 
 - A child raises an ordinary exception → siblings are not automatically cancelled.
 - A child is cancelled → `gather()` itself is not automatically cancelled.
 - The caller cancels `gather()` → unfinished children are cancelled.
+
+### Async debugging and failure diagnosis

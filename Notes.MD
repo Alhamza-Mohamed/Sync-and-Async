@@ -16,6 +16,7 @@
     - [`await` vs `asyncio.create_task`](#await-vs-asynciocreate_task)
     - [`asyncio.gather()`](#asynciogather)
     - [Events](#events)
+    - [Stacks](#stacks)
     - [Timeouts](#timeouts)
     - [Async generators and streaming](#async-generators-and-streaming)
     - [Context managers](#context-managers)
@@ -889,6 +890,23 @@ It has three important operations:
 - `event.set()`: sets the flag to `True` and wakes up coroutines waiting for it.
 - `event.clear()`: resets flag to `False`.
 - `await event.wait()`: suspends the current coroutine until the flag becomes `True`.
+
+### Stacks
+
+`Task.get_stack()` is a debugging and introspection method. When a task is suspended, `task.get_stack()` can return a list containing the python frame where the task is suspended.  
+
+**Frame:** an object representing an execution point in python code. It includes information such as the function being executed, its current line, and its local variables.
+
+`get_stack()` can help in async debugging by investigate where each task is suspended.  
+
+**Limitation of stack:** `get_stack()` shows the task's python execution frames, not a complete explanation of why it is waiting. It won't tell you whether a network request is slow, an event will be sent, or a queue will never receive an item.
+
+**Remember:**
+
+- `task.get_stack()`returns a list of frame objects, not strings.
+- A task that has completed or been cancelled generally has no useful suspended stack to inspect.
+- `task.print_stack()` is related method that prints a formatted stack trace, which can be more convenient for debugging.
+- `get_stack()` is an inspection tool. It **does not** resume, pause, cancel or otherwise control the task.
 
 ### Timeouts
 
@@ -2217,6 +2235,12 @@ It also separates the producer and consumer into independently operating compone
 ### Common async mistake
 
 #### Blocking the event loop accidentally
+
+Task can be blocked, suspended or finished:
+
+- **Blocking event loop:** synchronous code prevents the even loop from scheduling other tasks.
+- **Suspended task:** the coroutine is waiting for an event, I/O, or another awaitable. The event loop can run other tasks.
+- **Finished task:** the coroutine has returned raised and exception, or being cancelled.
 
 In **Example 1: async task with no suspension**:  
 

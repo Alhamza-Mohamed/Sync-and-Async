@@ -926,7 +926,7 @@ async def slow_operation():
 `raise` is used after the `except`. It re-throw the exception that is currently being handled.  
 It is like: "Yes, I caught it, but I am not claiming that the cancellation didn't happen. Pass it upward."
 
-The cancellation is the mechanism used to stop the operation, while `TimeoutError` is what the caller ultimately sees as the reason the timeout wrapper failed.
+The cancellation is the mechanism used to stop the operation, while `TimeoutError` is what the caller sees as the reason the timeout wrapper failed.
 
 Without a raise in the exception it will cause CancellationError.
 
@@ -1020,7 +1020,9 @@ So they finish before the 5 second deadline.
 The timeout is a single deadline shared by everything inside the `asyncio.timeout()` block.
 
 `asyncio.timeout()` does not give `gather()` a separate timeout for each operation. It establish one deadline for the entire block containing the `gather()`.  
-If one operation in gather is cancelled due to timeout the whole gather operation is cancelled. 
+If one operation in gather is cancelled due to timeout the whole gather operation is cancelled.
+
+`asyncio.wait_for()` is effective for awaitables operations that let the event loop run. But `wait_for()` cannot enforce the deadline on synchronous blocking operations (like CPU bound operations) while the event-loop thread is blocked.
 
 ### Async generators and streaming
 

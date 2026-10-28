@@ -2580,3 +2580,14 @@ If `main()` is cancelled while awaiting `group`, the cancellation propagates to 
 - The caller cancels `gather()` → unfinished children are cancelled.
 
 ### Async debugging and failure diagnosis
+
+There is useful methods to inspect a task state:
+
+- `task.done()`: It tells whether the task has finished, regardless of outcome. Means tasks that has been cancelled or raised an error consider finished.
+- `task.exception()`: It tells us if the task raise an exception. If it returns `None` the task completed without an exception.
+- `task.result()`: It tells us the what value did the task return. It raises the stored exception if the task failed, and `asyncio.InvalidStateError` if the task has not finished.
+- `task.cancelled()`: It tells whether the task finished through cancellation.
+- `task.get_coro()`: It tells us the coroutine object associated with the task.
+- `task.get_stack()`: It tells the stack-frame information, it is useful for inspecting where a task is suspended.
+
+Remember that `task.cancelled()` is a status check not a cancellation request, The request is made with `task.cancel()`.

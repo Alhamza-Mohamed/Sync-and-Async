@@ -35,6 +35,12 @@
       - [Assuming cancelling one child of `asyncio.gather()`cancels its siblings](#assuming-cancelling-one-child-of-asynciogathercancels-its-siblings)
       - [Assuming cancelling `gather()` does not cancel its unfinished children](#assuming-cancelling-gather-does-not-cancel-its-unfinished-children)
     - [Async debugging and failure diagnosis](#async-debugging-and-failure-diagnosis)
+    - [Performance considerations and appropriate concurrency](#performance-considerations-and-appropriate-concurrency)
+      - [I/O concurrency versus sequential execution](#io-concurrency-versus-sequential-execution)
+      - [Controlling concurrency and memory](#controlling-concurrency-and-memory)
+      - [Concurrency limits and performance measurements](#concurrency-limits-and-performance-measurements)
+      - [Slow and optional dependencies](#slow-and-optional-dependencies)
+      - [CPU-bound work versus I/O-bound work](#cpu-bound-work-versus-io-bound-work)
 
 # Sync and Async
 
@@ -2591,3 +2597,77 @@ There is useful methods to inspect a task state:
 - `task.get_stack()`: It tells the stack-frame information, it is useful for inspecting where a task is suspended.
 
 Remember that `task.cancelled()` is a status check not a cancellation request, The request is made with `task.cancel()`.
+
+### Performance considerations and appropriate concurrency
+
+#### I/O concurrency versus sequential execution
+
+When independent operations spend most of their time waiting for I/O, concurrency lets their waiting periods overlap.
+
+For three operations tasking 2 seconds each:
+
+- sequential execution: approximately 6 seconds.
+- concurrent execution: approximately 2 seconds.
+
+The event loop uses one thread to manage these tasks. it switch between them when they suspend; is doesn't execute their python code simultaneously.
+
+#### Controlling concurrency and memory
+
+Creating 10,000 tasks immediately can waste memory and overwhelm an external API.  
+A better architecture can use a fixed number of worker tasks consuming documents from a queue.
+
+- `asyncio.Semaphore(100)`: limits how many coroutines can enter a protected section concurrently.
+- A fixed pool of 100 workers limits the number of worker tasks.
+- `asyncio.Queue(maxsize = 200) bounds the number of queued items and provided backpressure.
+
+```python
+import asyncio
+
+semaphore = asyncio.Semaphore(100)
+
+async def limited_fetch(document):
+    async with semaphore:
+        return await fetch(document)
+```
+When a bounded queue is full, `await queue.put(item)` suspends the producer coroutine until capacity becomes available. The event loop remains free to schedule other tasks.
+
+**Remember** liming active requests and limiting task creation are two separate concerns.
+
+#### Concurrency limits and performance measurements
+
+Important distinguished metrics:
+
+- Concurrency: How many operations can be in progress at once.
+- Throughput: How many operations completed per unit of time.
+- Latency: How long an individual operation takes.
+
+Increasing concurrency can improve throughput until a bottleneck appears. Beyond that point,  additional concurrency may consume more resources, increase latency, and provide little benefit.
+
+#### Slow and optional dependencies
+
+For independent operations taking 100 ms and 900 ms, concurrent execution takes approximately 900 ms if both results are required.  
+The slowest required dependency determines when the combined operation can proceed.
+
+For optional work:
+
+- If the result is required, wait for it.
+- If it is useful later, it may run in a separately managed background task.
+- If its result is no longer useful after a deadline, a timeout and cancellation may be appropriate.
+
+**Be careful:** applying `asyncio.wait_for()` to an entire `gather()` operation can cancel unfinished child tasks, even if another child already succeeded. Background tasks also require exception handling and lifecycle management.
+
+#### CPU-bound work versus I/O-bound work
+
+Declaring a function `async` doesn't automatically make CPU-heavy synchronous code non blocking.
+
+If 100 operations each perform 200 ms of CPU-bound work without suspending, one event-loop thread could take approximately 20 seconds to execute them sequentially.
+
+A process pool can run CPU-heavy work in separate processes, potentially using multiple CPU cores. This can protect the event loop and, when multiple calculations run in parallel, improve overall throughput.
+
+The distinction to remember:
+
+- Async concurrency: Overlaps waiting time.
+- Parallelism: Executes computations simultaneously, typically on separate CPU cores in this example.
+- Offloading: Moves work away from the event-loop thread so it can continue handling other operations.
+
+Offloading protects responsiveness; Parallelism can additionally reduce total computation time.

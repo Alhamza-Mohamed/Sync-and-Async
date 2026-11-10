@@ -2671,3 +2671,24 @@ The distinction to remember:
 - Offloading: Moves work away from the event-loop thread so it can continue handling other operations.
 
 Offloading protects responsiveness; Parallelism can additionally reduce total computation time.
+
+**Example 2: CPU-bound task sequentially** shows that there is no  difference between a sequential operation and async operation when it comes to CPU-bound tasks
+
+**Example 3: Introducing ProcessPoolExecutor** shows how to perform multiple CPU-bound tasks in parallel using separate CPU cores simultaneously.
+
+- `ProcessPoolExecutor`: manages separate python processes.
+- `asyncio.get_running_loop()` returns the event loop that is currently running in hte thread from which you call it.
+- `run_in_executor()` submits synchronous work to the process pool without blocking the event loop
+
+The time of finishing the execution of the 4 tasks in parallel nearly quarter the time needed to finish them sequentially but the speedup is NOT guaranteed to be exactly 4 times because CPUs don't guarantee perfect scaling, also there are additional costs:
+
+- Process creation and initialization.
+- Transferring arguments and results between process.
+- Operating-system scheduling.
+- CPU contention and memory bandwidth.
+- Unequal execution times.
+
+We can combine asynchronous I/O and process-based parallelism in one application.  
+If we have two operations A which is an I/O bound operation and B which is CPU bound operation we can use async I/O for operation A and `ProcessPoolExecutor` in operation.  
+They using different execution mechanisms, but they cooperate through **event loop**.  
+

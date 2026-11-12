@@ -41,6 +41,7 @@
       - [Concurrency limits and performance measurements](#concurrency-limits-and-performance-measurements)
       - [Slow and optional dependencies](#slow-and-optional-dependencies)
       - [CPU-bound work versus I/O-bound work](#cpu-bound-work-versus-io-bound-work)
+      - [Bounded concurrency and pipeline architecture](#bounded-concurrency-and-pipeline-architecture)
 
 # Sync and Async
 
@@ -2674,10 +2675,12 @@ Offloading protects responsiveness; Parallelism can additionally reduce total co
 
 **Example 2: CPU-bound task sequentially** shows that there is no  difference between a sequential operation and async operation when it comes to CPU-bound tasks
 
+#### Bounded concurrency and pipeline architecture
+
 **Example 3: Introducing ProcessPoolExecutor** shows how to perform multiple CPU-bound tasks in parallel using separate CPU cores simultaneously.
 
 - `ProcessPoolExecutor`: manages separate python processes.
-- `asyncio.get_running_loop()` returns the event loop that is currently running in hte thread from which you call it.
+- `asyncio.get_running_loop()` returns the event loop that is currently running in the thread from which you call it.
 - `run_in_executor()` submits synchronous work to the process pool without blocking the event loop
 
 The time of finishing the execution of the 4 tasks in parallel nearly quarter the time needed to finish them sequentially but the speedup is NOT guaranteed to be exactly 4 times because CPUs don't guarantee perfect scaling, also there are additional costs:
@@ -2692,3 +2695,57 @@ We can combine asynchronous I/O and process-based parallelism in one application
 If we have two operations A which is an I/O bound operation and B which is CPU bound operation we can use async I/O for operation A and `ProcessPoolExecutor` in operation.  
 They using different execution mechanisms, but they cooperate through **event loop**.  
 
+`asyncio.as_completed()`:retrieves results in completion order, rather than the input order and yield each awaitable as its corresponding operation completes.  
+Unlike `gather()` that returns results in the original input order, after all operations finish.
+
+In **Example 5: Async download + CPU processing**  
+
+Our pipeline have three stages:
+
+1. Download documents concurrently using asynchronous I/O.
+2. Submit downloaded documents to a `ProcessPoolExecutor`.
+3. Collect the processed results.
+
+without using `await` in:
+
+```python
+task = loop.run_in_executor(
+    pool,
+    process_document,
+    document
+)
+```
+
+This submits the synchronous function to the executor.  
+The executor schedules it in a worker process. The event loop doesn't wait for the CPU calculation to finish.  
+The returned object is an asyncio-compatible future representing that work.
+
+If we use `await`:
+
+```python
+result = await loop.run_in_executor(
+    pool,
+    process_document,
+    document
+)
+```
+
+The work is still submitted to the process pool.
+**The difference is that the current coroutine now waits for the result**.  
+This does not block the event loop.  
+While this coroutine is suspended waiting for the process, the event loop can execute other tasks, including the remaining download operations.  
+
+The distinction is:
+
+- `await` suspends the current coroutine when the awaited operation isn't ready.
+- Blocking synchronous code prevents the event loop thread from executing other tasks.
+
+**Suppose having 10,000 documents and 8 CPU cores**, we wont create 10,000 process futures immediately.  
+We are hiving finite CPU resources so we should distribute work across controlled number of worker rather than create enormous number of active operations.  
+We are going to assign the max worker to be equal 8, the process pool submits jobs to the executor and its internal scheduling mechanism distributes them among available worker processes.
+
+The documents does not have same processing time. so the best approach is when the `ProcessPoolExecutor` find a free executor it assign an operations for it.
+
+The `ProcessPoolExecutor` schedules work to worker processes, not directly to physical CPU cores. The operating system schedules those processes to the available cores.
+
+**Dynamic scheduling:** scheduling strategy where workers receive new jobs as they become available, `ProcessPoolExecutor` is a tool that implements it for process-based execution.

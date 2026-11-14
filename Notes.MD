@@ -41,7 +41,12 @@
       - [Concurrency limits and performance measurements](#concurrency-limits-and-performance-measurements)
       - [Slow and optional dependencies](#slow-and-optional-dependencies)
       - [CPU-bound work versus I/O-bound work](#cpu-bound-work-versus-io-bound-work)
-      - [Bounded concurrency and pipeline architecture](#bounded-concurrency-and-pipeline-architecture)
+      - [Process-based parallelism with `ProcessPoolExecutor`](#process-based-parallelism-with-processpoolexecutor)
+      - [Combining asynchronous I/O and CPU processing](#combining-asynchronous-io-and-cpu-processing)
+      - [Completion-order processing with `asyncio.as_completed()`](#completion-order-processing-with-asyncioas_completed)
+      - [Submitting work to an executor and awaiting its result](#submitting-work-to-an-executor-and-awaiting-its-result)
+      - [Dynamic scheduling and load balancing](#dynamic-scheduling-and-load-balancing)
+      - [Bounded pipeline architecture](#bounded-pipeline-architecture)
 
 # Sync and Async
 
@@ -2586,6 +2591,8 @@ If `main()` is cancelled while awaiting `group`, the cancellation propagates to 
 - A child is cancelled → `gather()` itself is not automatically cancelled.
 - The caller cancels `gather()` → unfinished children are cancelled.
 
+---
+
 ### Async debugging and failure diagnosis
 
 There is useful methods to inspect a task state:
@@ -2599,27 +2606,31 @@ There is useful methods to inspect a task state:
 
 Remember that `task.cancelled()` is a status check not a cancellation request, The request is made with `task.cancel()`.
 
+---
+
 ### Performance considerations and appropriate concurrency
 
 #### I/O concurrency versus sequential execution
 
 When independent operations spend most of their time waiting for I/O, concurrency lets their waiting periods overlap.
 
-For three operations tasking 2 seconds each:
+For three operations taking 2 seconds each:
 
-- sequential execution: approximately 6 seconds.
-- concurrent execution: approximately 2 seconds.
+- Sequential execution: approximately 6 seconds.
+- Concurrent execution: approximately 2 seconds.
 
-The event loop uses one thread to manage these tasks. it switch between them when they suspend; is doesn't execute their python code simultaneously.
+In a typical asyncio application, the event loop executes Python code for one task at a time in its thread. When a coroutine suspends and yields control, the event loop can schedule another ready task. Their execution overlaps in time, but their Python code does not execute simultaneously on that event-loop thread.
 
 #### Controlling concurrency and memory
 
-Creating 10,000 tasks immediately can waste memory and overwhelm an external API.  
+Creating 10,000 tasks immediately can waste memory and overwhelm an external API.
+
 A better architecture can use a fixed number of worker tasks consuming documents from a queue.
 
 - `asyncio.Semaphore(100)`: limits how many coroutines can enter a protected section concurrently.
 - A fixed pool of 100 workers limits the number of worker tasks.
-- `asyncio.Queue(maxsize = 200) bounds the number of queued items and provided backpressure.
+- If each worker processes one item at a time and awaits its processing operation, the worker count also limits the number of simultaneously processed items.
+- `asyncio.Queue(maxsize=200)`: bounds the number of queued items and provides backpressure.
 
 ```python
 import asyncio
@@ -2630,23 +2641,25 @@ async def limited_fetch(document):
     async with semaphore:
         return await fetch(document)
 ```
+
 When a bounded queue is full, `await queue.put(item)` suspends the producer coroutine until capacity becomes available. The event loop remains free to schedule other tasks.
 
-**Remember** liming active requests and limiting task creation are two separate concerns.
+**Remember:** Limiting active requests and limiting task creation are two separate concerns.
 
 #### Concurrency limits and performance measurements
 
-Important distinguished metrics:
+Important performance metrics:
 
 - Concurrency: How many operations can be in progress at once.
-- Throughput: How many operations completed per unit of time.
+- Throughput: How many operations are completed per unit of time.
 - Latency: How long an individual operation takes.
 
-Increasing concurrency can improve throughput until a bottleneck appears. Beyond that point,  additional concurrency may consume more resources, increase latency, and provide little benefit.
+Increasing concurrency can improve throughput until a bottleneck appears. Beyond that point, additional concurrency may consume more resources, increase latency, and provide little benefit.
 
 #### Slow and optional dependencies
 
-For independent operations taking 100 ms and 900 ms, concurrent execution takes approximately 900 ms if both results are required.  
+For independent operations taking 100 ms and 900 ms, concurrent execution takes approximately 900 ms if both results are required.
+
 The slowest required dependency determines when the combined operation can proceed.
 
 For optional work:
@@ -2655,11 +2668,11 @@ For optional work:
 - If it is useful later, it may run in a separately managed background task.
 - If its result is no longer useful after a deadline, a timeout and cancellation may be appropriate.
 
-**Be careful:** applying `asyncio.wait_for()` to an entire `gather()` operation can cancel unfinished child tasks, even if another child already succeeded. Background tasks also require exception handling and lifecycle management.
+**Be careful:** Applying `asyncio.wait_for()` to an entire `gather()` operation can cancel unfinished child tasks, even if another child already succeeded. Background tasks also require exception handling and lifecycle management.
 
 #### CPU-bound work versus I/O-bound work
 
-Declaring a function `async` doesn't automatically make CPU-heavy synchronous code non blocking.
+Declaring a function `async` doesn't automatically make CPU-heavy synchronous code non-blocking.
 
 If 100 operations each perform 200 ms of CPU-bound work without suspending, one event-loop thread could take approximately 20 seconds to execute them sequentially.
 
@@ -2671,42 +2684,51 @@ The distinction to remember:
 - Parallelism: Executes computations simultaneously, typically on separate CPU cores in this example.
 - Offloading: Moves work away from the event-loop thread so it can continue handling other operations.
 
-Offloading protects responsiveness; Parallelism can additionally reduce total computation time.
+Offloading work to an executor protects event-loop responsiveness even when the executor does not provide parallel execution. Parallelism can additionally reduce total computation time when multiple CPU-bound jobs execute simultaneously in separate processes.
 
-**Example 2: CPU-bound task sequentially** shows that there is no  difference between a sequential operation and async operation when it comes to CPU-bound tasks
+**Example 2: CPU-bound task sequentially** shows that there is no difference between a sequential operation and an async operation when it comes to CPU-bound tasks.
 
-#### Bounded concurrency and pipeline architecture
+#### Process-based parallelism with `ProcessPoolExecutor`
 
 **Example 3: Introducing ProcessPoolExecutor** shows how to perform multiple CPU-bound tasks in parallel using separate CPU cores simultaneously.
 
-- `ProcessPoolExecutor`: manages separate python processes.
+- `ProcessPoolExecutor`: Manages separate Python processes.
 - `asyncio.get_running_loop()` returns the event loop that is currently running in the thread from which you call it.
-- `run_in_executor()` submits synchronous work to the process pool without blocking the event loop
+- `run_in_executor()` submits synchronous work to the process pool without blocking the event loop.
 
-The time of finishing the execution of the 4 tasks in parallel nearly quarter the time needed to finish them sequentially but the speedup is NOT guaranteed to be exactly 4 times because CPUs don't guarantee perfect scaling, also there are additional costs:
+The time needed to finish the execution of the four tasks in parallel is nearly a quarter of the time needed to finish them sequentially. However, the speedup is NOT guaranteed to be exactly four times because CPUs don't guarantee perfect scaling. There are also additional costs:
 
 - Process creation and initialization.
-- Transferring arguments and results between process.
+- Transferring arguments and results between processes.
 - Operating-system scheduling.
 - CPU contention and memory bandwidth.
 - Unequal execution times.
 
-We can combine asynchronous I/O and process-based parallelism in one application.  
-If we have two operations A which is an I/O bound operation and B which is CPU bound operation we can use async I/O for operation A and `ProcessPoolExecutor` in operation.  
-They using different execution mechanisms, but they cooperate through **event loop**.  
+#### Combining asynchronous I/O and CPU processing
 
-`asyncio.as_completed()`:retrieves results in completion order, rather than the input order and yield each awaitable as its corresponding operation completes.  
-Unlike `gather()` that returns results in the original input order, after all operations finish.
+We can combine asynchronous I/O and process-based parallelism in one application.
 
-In **Example 5: Async download + CPU processing**  
+If we have two operations, A, which is an I/O-bound operation, and B, which is a CPU-bound operation, we can use async I/O for operation A and `ProcessPoolExecutor` for operation B.
 
-Our pipeline have three stages:
+Asynchronous I/O is coordinated by the event loop, while CPU-bound work executes in separate processes. The event loop coordinates submission and retrieval of processing results through futures, allowing asynchronous operations to continue while CPU work executes.
+
+#### Completion-order processing with `asyncio.as_completed()`
+
+`asyncio.as_completed()`: Retrieves results in completion order, rather than input order, and yields each awaitable as its corresponding operation completes.
+
+Unlike `gather()`, which returns results in the order of the awaitables supplied to it, not necessarily the original input order of the underlying operations.
+
+In **Example 5: Async download + CPU processing**:
+
+Our pipeline has three stages:
 
 1. Download documents concurrently using asynchronous I/O.
 2. Submit downloaded documents to a `ProcessPoolExecutor`.
 3. Collect the processed results.
 
-without using `await` in:
+#### Submitting work to an executor and awaiting its result
+
+Without using `await`:
 
 ```python
 task = loop.run_in_executor(
@@ -2716,8 +2738,10 @@ task = loop.run_in_executor(
 )
 ```
 
-This submits the synchronous function to the executor.  
-The executor schedules it in a worker process. The event loop doesn't wait for the CPU calculation to finish.  
+This submits the synchronous function to the executor.
+
+The executor schedules it in a worker process. The event loop doesn't wait for the CPU calculation to finish.
+
 The returned object is an asyncio-compatible future representing that work.
 
 If we use `await`:
@@ -2731,21 +2755,75 @@ result = await loop.run_in_executor(
 ```
 
 The work is still submitted to the process pool.
-**The difference is that the current coroutine now waits for the result**.  
-This does not block the event loop.  
-While this coroutine is suspended waiting for the process, the event loop can execute other tasks, including the remaining download operations.  
+
+**The difference is that the current coroutine now waits for the result.**
+
+This does not block the event loop.
+
+While this coroutine is suspended waiting for the process, the event loop can execute other tasks, including the remaining download operations.
 
 The distinction is:
 
 - `await` suspends the current coroutine when the awaited operation isn't ready.
 - Blocking synchronous code prevents the event loop thread from executing other tasks.
 
-**Suppose having 10,000 documents and 8 CPU cores**, we wont create 10,000 process futures immediately.  
-We are hiving finite CPU resources so we should distribute work across controlled number of worker rather than create enormous number of active operations.  
-We are going to assign the max worker to be equal 8, the process pool submits jobs to the executor and its internal scheduling mechanism distributes them among available worker processes.
+#### Dynamic scheduling and load balancing
 
-The documents does not have same processing time. so the best approach is when the `ProcessPoolExecutor` find a free executor it assign an operations for it.
+**Suppose we have 10,000 documents and 8 CPU cores.** We won't create 10,000 process futures immediately.
+
+We have finite CPU resources, so we should distribute work across a controlled number of workers rather than create an enormous number of active operations.
+
+We are going to assign the maximum number of workers to be 8. We submit jobs to the `ProcessPoolExecutor`, whose internal scheduling mechanism distributes submitted jobs among available worker processes.
+
+The documents do not have the same processing time. Dynamic scheduling allows available workers to take additional jobs as they finish their current work. This avoids the imbalance that can occur when jobs with different processing times are statically assigned to workers in advance.
 
 The `ProcessPoolExecutor` schedules work to worker processes, not directly to physical CPU cores. The operating system schedules those processes to the available cores.
 
+**Dynamic scheduling:** A scheduling strategy where workers receive new jobs as they become available. `ProcessPoolExecutor` is a tool that implements it for process-based execution.
+
+**Dynamic scheduling vs static assignment**
+
+Static assignment: Distributes a predetermined workload among workers in advance.
+
+If processing times differ, some workers may finish early and remain idle while others continue working.
+
+Dynamic scheduling: Allows available workers to retrieve additional jobs as they finish their current work, improving resource utilization when job durations vary.
+
+A shared work queue is one way to implement dynamic scheduling.
+
+`ProcessPoolExecutor` also manages submitted jobs and distributes them among its worker processes.
+
+#### Bounded pipeline architecture
+
+A bounded pipeline can control both pending work and submitted CPU jobs:
+
+- The bounded queue limits the number of waiting documents.
+- The asyncio worker count limits how many documents are being orchestrated.
+- Each worker submits one CPU job and awaits its completion.
+- The process-pool worker count limits how many CPU jobs can execute simultaneously.
+
+**Worker count and process-pool size are separate configuration decisions.**
+
+The number of asyncio workers and the number of process-pool workers are independent configuration choices.
+
+In our example, we used 8 asyncio workers and 8 process workers. Each asyncio worker submits one CPU job at a time and awaits its completion. This allows us to keep up to eight CPU jobs submitted simultaneously.
+
+More asyncio workers don't automatically increase CPU throughput when the process pool is already fully occupied.
+
+They may instead increase the number of pending jobs and memory consumption.
+
+- Asyncio workers' responsibilities: Orchestration and coordination.
+- Process workers' responsibilities: CPU-bound execution.
+
 **Dynamic scheduling:** scheduling strategy where workers receive new jobs as they become available, `ProcessPoolExecutor` is a tool that implements it for process-based execution.
+
+**Dynamic scheduling vs static assignment**  
+
+Static assignment: distributes a predetermined workload among workers in advance.  
+If processing time differ, some workers may finish early and remain idle while others continue working.  
+
+Dynamic scheduling: allows available workers to retrieve additional jobs as they finish their current work, improving resource utilization when job duration vary.
+
+A shared work queue is one way to implement dynamic scheduling.  
+`ProcessPoolExecutor` also manages submitted jobs and distributes them among its worker processes.
+

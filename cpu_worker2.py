@@ -4,7 +4,10 @@ def cpu_work(n: int) -> int:
         total += i * i
     return total
 
+import time
+
 def process_document(document_id: int) -> int:
+    time.sleep(5)
     if document_id == 3:
         raise ValueError("Document 3 is corrupted")
     total = 0

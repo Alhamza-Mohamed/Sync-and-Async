@@ -47,6 +47,7 @@
       - [Submitting work to an executor and awaiting its result](#submitting-work-to-an-executor-and-awaiting-its-result)
       - [Dynamic scheduling and load balancing](#dynamic-scheduling-and-load-balancing)
       - [Bounded pipeline architecture](#bounded-pipeline-architecture)
+    - [Reliability  and failure coordination](#reliability--and-failure-coordination)
 
 # Sync and Async
 
@@ -1138,6 +1139,18 @@ The queue is useful when:
 - The producer is needed to be independent from the consumer.
 
 > Use a queue when the producer should be able to continue independently of the consumer and therefore needs somewhere to buffer its output.
+
+`asyncio.Queue` maintains an internal counter called the number of unfinished tasks.
+
+- Every successful `queue.put(item)` increments the counter.
+- Every corresponding `queue.task(done)` decrements it.
+- `queue.join()`: Suspends the calling coroutine until the counter reaches zero.
+
+`queue.get()` removes an item from its awaiting items, But the unfinished tasks counter does not decrease why?  
+Because retrieving a document does not mean it is completed.
+
+- `queue.get()`: Removes an item from the queue.
+- `queue.task_done()`: Tells the queue that processing of that retrieved item has been accounted for.
 
 ### Context managers
 
@@ -2781,7 +2794,7 @@ The `ProcessPoolExecutor` schedules work to worker processes, not directly to ph
 
 **Dynamic scheduling:** A scheduling strategy where workers receive new jobs as they become available. `ProcessPoolExecutor` is a tool that implements it for process-based execution.
 
-**Dynamic scheduling vs static assignment**
+**Dynamic scheduling vs static assignment**  
 
 Static assignment: Distributes a predetermined workload among workers in advance.
 
@@ -2800,7 +2813,7 @@ A bounded pipeline can control both pending work and submitted CPU jobs:
 - The bounded queue limits the number of waiting documents.
 - The asyncio worker count limits how many documents are being orchestrated.
 - Each worker submits one CPU job and awaits its completion.
-- The process-pool worker count limits how many CPU jobs can execute simultaneously.
+ The process-pool worker count limits how many CPU jobs can execute simultaneously.
 
 **Worker count and process-pool size are separate configuration decisions.**
 
@@ -2820,10 +2833,22 @@ They may instead increase the number of pending jobs and memory consumption.
 **Dynamic scheduling vs static assignment**  
 
 Static assignment: distributes a predetermined workload among workers in advance.  
-If processing time differ, some workers may finish early and remain idle while others continue working.  
+/If processing time differ, some workers may finish early and remain idle while others continue working.  
 
 Dynamic scheduling: allows available workers to retrieve additional jobs as they finish their current work, improving resource utilization when job duration vary.
 
 A shared work queue is one way to implement dynamic scheduling.  
 `ProcessPoolExecutor` also manages submitted jobs and distributes them among its worker processes.
 
+### Reliability  and failure coordination
+
+**Document-level failure:** One document fails, but the worker catches the exception and continues processing other documents.
+
+**Worker-level failure:** The worker itself terminates unexpectedly. It can no longer process anything from the queue.
+
+Worker-level failure is more dangerous because the pipeline may continue running even through part of its workforce has disappeared.
+
+The cancellation of CPU-bound function does not stop executing. Cancelling the asyncio task doesn't guarantee that an already-running process-pool job is stopped.
+
+Suppose `process_documents(7) takes 5 seconds, and we cancelled it after 1 seconds.  
+The asyncio worker stops waiting, but the process continues executing the function because the cancel affects the asyncio worker not the process pool.

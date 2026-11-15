@@ -5,8 +5,7 @@ def cpu_work(n: int) -> int:
     return total
 
 def process_document(document_id: int) -> int:
-    if document_id == 3:
-        raise ValueError("Document 3 is corrupted")
+
     total = 0
 
     for i in range(100):

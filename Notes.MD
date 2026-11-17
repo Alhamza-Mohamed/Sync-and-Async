@@ -49,6 +49,7 @@
       - [Bounded pipeline architecture](#bounded-pipeline-architecture)
     - [Reliability  and failure coordination](#reliability--and-failure-coordination)
       - [Graceful shutdown](#graceful-shutdown)
+      - [Cancellation and resource cleanup](#cancellation-and-resource-cleanup)
 
 # Sync and Async
 
@@ -2918,4 +2919,8 @@ async def worker():
 
 The `Worker: cleanup finished` will not always be printed because there is a situation where cancellation can interrupt the cleanup itself.  
 The cancellation may take place while the finally is still suspended. So it will be cancelled before output the next line.
+
+#### Cancellation and resource cleanup
+
+`asyncio.shield()`: It prevents cancellation of the outer task from propagating to the inner awaitable, means it protects the inner operation but it does not make the outer coroutine waits for that operation to finish.
 

@@ -48,6 +48,7 @@
       - [Dynamic scheduling and load balancing](#dynamic-scheduling-and-load-balancing)
       - [Bounded pipeline architecture](#bounded-pipeline-architecture)
     - [Reliability  and failure coordination](#reliability--and-failure-coordination)
+      - [Graceful shutdown](#graceful-shutdown)
 
 # Sync and Async
 
@@ -2852,3 +2853,69 @@ The cancellation of CPU-bound function does not stop executing. Cancelling the a
 
 Suppose `process_documents(7) takes 5 seconds, and we cancelled it after 1 seconds.  
 The asyncio worker stops waiting, but the process continues executing the function because the cancel affects the asyncio worker not the process pool.
+
+#### Graceful shutdown
+
+**Sentinel:** a special value placed into a queue to communicate a control signal rather than carry actual work.
+
+In our pipeline, we use `None` as the sentinel.
+
+```python
+await queue.put(None)
+```
+
+The sentinel count is tied to the number of workers, not the number of documents.  
+For each worker we need one sentinel.
+
+Suppose we have worker:
+
+```python
+async def worker(queue, pool): 
+    loop = asyncio.get_running_loop()
+    
+    while True:
+        document = await queue.get()
+
+        try:
+            if document is None:
+                return
+
+            result = await loop.run_in_executor(
+                pool,
+                process_document,
+                document
+            )
+
+            print(f"Worker received result: {result}")
+
+        except Exception as exc:
+            print(f"Document {document} failed: {type(exc).__name__}: {exc}")
+        
+        finally:
+            queue.task_done()
+            print(f"Document {document} marked done")
+```
+
+If the worker is cancelled while awaiting its CPU job, `finally` will be executed.  
+First, `CancelledError` is not an ordinary processing exception, so `except` does not catch it.
+
+Second why does `finally` execute?  
+Because `calling task.cancel()` request cancellation, python raises `cancelledError` when the coroutine reaches an opportunity to receive cancellation.
+
+If the resource require an asynchronously closed before the coroutine, the `finally` block is allowed to contain `await`
+
+```python
+async def worker():
+    try:
+        print("Worker: processing")
+        await asyncio.sleep(10)
+
+    finally:
+        print("Worker: cleanup started")
+        await asyncio.sleep(2)
+        print("Worker: cleanup finished")
+```
+
+The `Worker: cleanup finished` will not always be printed because there is a situation where cancellation can interrupt the cleanup itself.  
+The cancellation may take place while the finally is still suspended. So it will be cancelled before output the next line.
+

@@ -50,6 +50,8 @@
     - [Reliability  and failure coordination](#reliability--and-failure-coordination)
       - [Graceful shutdown](#graceful-shutdown)
       - [Cancellation and resource cleanup](#cancellation-and-resource-cleanup)
+      - [Cleanup Task supervision](#cleanup-task-supervision)
+      - [Final architecture review](#final-architecture-review)
 
 # Sync and Async
 
@@ -2923,4 +2925,46 @@ The cancellation may take place while the finally is still suspended. So it will
 #### Cancellation and resource cleanup
 
 `asyncio.shield()`: It prevents cancellation of the outer task from propagating to the inner awaitable, means it protects the inner operation but it does not make the outer coroutine waits for that operation to finish.
+
+#### Cleanup Task supervision
+
+Supervisor: component responsible for overseeing the execution and lifecycle of other components, usually tasks or workers.  
+
+Supervisor do 3 things:  
+
+- Monitoring the tasks it is responsible for
+- Failure detection and coordination
+- Lifecycle management
+
+The current components to coordinate:
+
+- Producer: Download the documents and submits them to the queue.
+- Worker: Retrieve documents and submits CPU-bound jobs to the process pool.
+- Supervisor: Monitors the producer and workers. coordinates failures, and manages shutdown.
+
+**Failure vs cancellation**  
+
+Suppose a worker encounter an unexpected error:
+
+```python
+raise RuntimeError("Unexpected worker failure")
+```
+
+The supervisor should detect the failure and apply the pipeline failure policy. 
+
+On the other hands if the supervisor executes `worker_task.cancel()` this is an intentional shutdown. The worker isn't necessarily malfunctioning.
+
+#### Final architecture review
+
+- Producer: downloads documents and puts them into `asyncio.Queue`.
+- Queue: Coordinates work  distribution and provides bounded buffering.
+- Workers: Retrieve documents and submit CPU-bound processing jobs through `run_in_executor()`.
+- Process pool: Executes CPU-bound function in separate processes.
+
+**Reliable concurrent pipeline:**
+
+- Execution: Producer, queue, worker, and process pool.
+- Coordination: Queue accounting, sentinels, and task monitoring.
+- Failure management: Detect failures and distinguish them from cancellations.
+- Shutdown: Stop work, terminate tasks, complete critical cleanup, and shut down the process pool.
 

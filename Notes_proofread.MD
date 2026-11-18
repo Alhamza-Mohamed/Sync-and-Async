@@ -15,6 +15,7 @@
   - [Async in python](#async-in-python)
     - [`await` vs `asyncio.create_task`](#await-vs-asynciocreate_task)
     - [`asyncio.gather()`](#asynciogather)
+    - [Structured concurrency with `asyncio.TaskGroup`](#structured-concurrency-with-asynciotaskgroup)
     - [Events](#events)
     - [Stacks](#stacks)
     - [Timeouts](#timeouts)
@@ -55,7 +56,7 @@
 
 # Sync and Async
 
-Synchronous (Sync) execution: The operations happen one after another  in order. Each operation must finish (executed) before the next one starts.
+Synchronous (Sync) execution: The operations happen one after another in order. Each operation must finish executing before the next one starts.
 
 Asynchronous (Async) execution: An operation can be started and suspended while waiting, instead of blocking allowing other work to make progress before that operation finishes.
 
@@ -67,8 +68,8 @@ Blocking operation: operation that prevents your program from making progress un
 data = request.get(...)
 ```
 
-The program cant execute the next line until that HTTP request completes. It is blocked.  
-Not because python is "busy thinking", but because it is a waiting for something  outside that process to respond.
+The program can't execute the next line until that HTTP request completes. It is blocked.  
+Not because Python is "busy thinking", but because it is waiting for something outside that process to respond.
 
 That "something" could be:
 
@@ -79,13 +80,13 @@ That "something" could be:
 - Vector database.
 - Cloud storage.
 
-Python isn't doing hte work, the remote server is. Python is just waiting.  
+Python isn't doing the work, the remote server is. Python is just waiting.  
 
 ## CPU-bound vs I/O bound
 
 ### CPU-bound
 
-A task is CPU bound when the processor is actively doing calculations. i.e. Tasks use the processor heavily.
+A task is CPU-bound when the processor is actively doing calculations, i.e., when tasks use the processor heavily.
 
 **Example**:
 
@@ -98,7 +99,7 @@ A task is CPU bound when the processor is actively doing calculations. i.e. Task
 
 ### I/O bound
 
-Task that spend most of its time waiting for input or output.
+A task that spends most of its time waiting for input or output.
 
 **Example**:
 
@@ -110,11 +111,11 @@ Task that spend most of its time waiting for input or output.
 - Querying a vector database.
 - Calling an LLM API.'
 
-The CPU does very little word. Most of the elapsed is waiting.
+The CPU does very little work. Most of the elapsed time is spent waiting.
 
 > Don't waste a scarce computational resource waiting for something that doesn't require that resource to be continuously occupied.  
 
-Async/concurrency is especially valuable when work contains periods where it cannot make progress because it is waiting for something external. I.e it is very valuable with I/O bound tasks not CPU bound tasks.
+Async/concurrency is especially valuable when work contains periods where it cannot make progress because it is waiting for something external. i.e., it is very valuable with I/O-bound tasks, not CPU-bound tasks.
 
 **preemption:** An operating system can interrupt a running CPU task and switch to another task.
 
@@ -122,7 +123,7 @@ Async/concurrency is especially valuable when work contains periods where it can
 
 ### Concurrency
 
- The ability of a system to make progress on multiple tasks during overlapping periods of time, by switching between tasks when appropriate. example if A waits for the database while B runs, A and B are progressing concurrently.  
+ The ability of a system to make progress on multiple tasks during overlapping periods of time by switching between tasks when appropriate. For example, if A waits for the database while B runs, A and B are progressing concurrently.  
 
 It has 2 types:
 
@@ -136,10 +137,10 @@ Pros:
 
 Cons:
 
-- A badly behaved task that does't yield can block other tasks.
+- A badly behaved task that doesn't yield can block other tasks.
 - The system can't force it to cooperate.
 
-**Preemptive concurrency:**  A concurrency model where the system can interrupt a running task and give anther task CPU time, without requiring the running task to voluntarily yield.
+**Preemptive concurrency:**  A concurrency model where the system can interrupt a running task and give another task CPU time, without requiring the running task to voluntarily yield.
 
 Pros:
 
@@ -227,12 +228,12 @@ Tasks are not threads. Many tasks can live on the same thread.
 **One thread per request/task**  
 for every task/request we make it in one thread alone.
 
-Each request has its own OS-manged execution context.
+Each request has its own OS-managed execution context.
 
 One thread per request is not a rule. It is one possible design, but production systems use a thread pool, where a limited number of threads handle many requests over time.
 
 Why we don't create 1000 threads for 1000 questions?  
-Because threads are'nt free. They consume memory and OS resources, and scheduling thousands of threads introduces overhead.
+Because threads aren't free. They consume memory and OS resources, and scheduling thousands of threads introduces overhead.
 
 Mental model:
 
@@ -306,7 +307,7 @@ Thread
          └── CPU work
 ```
 
-The thread needs t keep track of where each task currently is.
+The thread needs to keep track of where each task currently is.
 
 **Example**:
 
@@ -332,7 +333,7 @@ It is not enough to say "Stop A", the system needs to preserve A's execution sta
 The crucial property is **execution state of the task survives the suspension.**  
 And this is the conceptual reason we eventually need coroutines.
 
-**coroutines**: It is essentially a function-like computation that can suspend its execution and later resume from where it stopped(suspended).
+**coroutines**: It is essentially a function-like computation that can suspend its execution and later resume from where it stopped (suspended).
 
 When a task resumes, it doesn't start over. It effectively continues from the suspended point with its previous state intact.
 
@@ -346,7 +347,7 @@ The component that is responsible for managing the coroutines.
 
 The event loop is the mechanism that enables cooperative concurrency in async programs. It runs on a thread and manages multiple coroutines/tasks.  
 
-A task runs until it reaches an `await` point where it cannot make progress, then it yields control back to the event loop.  The event loop can then give the execution opportunity to another ready task.
+A task runs until it reaches an `await` point where it cannot make progress, then it yields control back to the event loop.  The event loop can then give another ready task an opportunity to execute.
 
 **Task state:** A task can be running, waiting/suspended, ready to resume, or completed:
 
@@ -413,9 +414,9 @@ Event Loop
 Coroutines / Tasks
 ```
 
-The CPU executes instruction.  
-The thread is the execution context running those instructions.  
-The even loop;o manages which async task gets that execution opportunity.  
+The CPU executes instructions.  
+The thread is the execution context that runs those instructions.  
+The event loop manages which async task gets that execution opportunity.  
 
 **Example** on how even loop work:**
 
@@ -426,7 +427,7 @@ C → waiting for HTTP
 ```
 
 The event loop chooses B, B runs and reaches an `await` for another HTTP request. At that exact moment the event loop can run another ready task.  
-The event loop does something like:
+The event loop does something like this:
 
 ``` text
 A → waiting for DB
@@ -446,7 +447,7 @@ other tasks? ready?
 Choose something that can run
 ```
 
-The event loop doesn't necessarily necessarily "check A, then C then D ..." by repeatedly asking every task whether it is ready.  
+The event loop doesn't necessarily "check A, then C then D ..." by repeatedly asking every task whether it is ready.  
 The underlying I/O system can  notify the event loop about which operations became ready.  
 That is one of the reasons event-driven systems scale well.
 
@@ -479,13 +480,13 @@ async def fetch_data():
     print ("started")
 ```
 
-When writing async function python coroutine function.
+When you define an async function, Python creates a coroutine function.
 
 ```python
 fetch_data()
 ```
 
-When calling the function only the python does not execute the body like a normal function call. It creates a coroutine object representing the computation that can be executed/resumed later.
+When calling the function, Python does not execute the body like a normal function call. It creates a coroutine object representing the computation that can be executed/resumed later.
 
 A coroutine object is not "running asynchronously", it is just an object representing work that can be run.  
 A task is what gives that coroutine an independent scheduled execution lifecycle with in the event loop.
@@ -556,7 +557,7 @@ Eventually it may reach another `await`
 
 `asyncio.create_task`  Means schedules a coroutine as a task on the event loop. It does not create a thread.
 
-`asyncio.run()` is the entry point that takes the coroutine-based program and gives it an event loop to execute it. It establish the environment in with the async program can run.
+`asyncio.run()` is the entry point that takes the coroutine-based program and gives it an event loop to execute it. It establishes the environment in which the async program can run.
 
 It is doing something like:
 
@@ -578,12 +579,12 @@ Clean up
 Close event loop
 ```
 
-If you tried to run `await task_A` in normal ordinary Python script at the top level, python would complain Because there is not already an event loop actively managing your code at that point.
+If you tried to run `await task_A` in a normal Python script at the top level, Python would complain because there is not already an event loop actively managing your code at that point.
 
-Jupyter notebook however, runs an environment that already has an event loop;o available for interactive execution.  
-So when you write `await task_A` inside Jupyter you already entering an already-running async environment.  
+Jupyter Notebook, however, runs an environment that already has an event loop available for interactive execution.  
+So when you write `await task_A` inside Jupyter you are already entering an already-running async environment.  
 
-But `asyncio.run(main())` in the same environment with error along lines of:
+But `asyncio.run(main())` in the same environment with an error along the lines of:
 
 ``` text
 RuntimeError:
@@ -608,7 +609,7 @@ In Jupyter, you can often simply do:
 await main()
 ```
 
-Awaitable: something that represents asynchronous work whose result may not be available yet, and that python know hwo to suspend and later resume around.
+Awaitable: something that represents asynchronous work whose result may not be available yet, and that Python knows how to suspend and later resume around.
 
 Kinds of awaitables:
 
@@ -654,13 +655,13 @@ async def get_users():
     return await client.get("/users")
 ```
 
-There is two fundamentally different ways to use it:
+There are two fundamentally different ways to use it:
 
 ```python
 result = await get_users()
 ```
 
-`await` means "Run/continue this awaitable as part of my current task, and suspend my current task until it produce a result."
+`await` means "Run/continue this awaitable as part of my current task, and suspend my current task until it produces a result."
 
 ```python
 task = asyncio.create_task(get_users())
@@ -691,7 +692,7 @@ Then there is 2 tasks:
 - Task1: program
 - Task2: Background
 
-`program` and call `await main()`, so `main()` runs as part of Task 1 (runs before `background()`).  
+`program` calls `await main()`, so `main()` runs as part of Task 1 (runs before `background()`).  
 Then suppose `main()` reaches `await get_users()`, and `get_users()` is waiting for the network I/O.
 
 Task 1 is suspended, but task 2 already exists:
@@ -714,7 +715,7 @@ async with client:
     response = await client.get("/users")
 ```
 
-the `get()` call produces a coroutine/awaitable, but hte actual network I/O happen inside the client function. Suppose `client.get()` do something like:
+the `get()` call produces a coroutine/awaitable, but the actual network I/O happens inside the client function. Suppose `client.get()` does something like:
 
 ```python
 async def get(url):
@@ -782,7 +783,7 @@ Both operations have been scheduled as independent tasks before the current task
 
 ### `asyncio.gather()`
 
-`asyncio.gather()`: It run concurrently, and don't continue until all of them have finished.
+`asyncio.gather()`: It runs operations concurrently and doesn't continue until all of them have finished.
 
 Conceptually
 
@@ -811,13 +812,13 @@ results = await asyncio.gather(
 ```
 
 `gather` expresses start A, start B, Start C and let them progress concurrently then wait until all of them are complete.  
-It does not control the order in which the task execute. The event  loop does that. `gather` coordinates multiple awaitables concurrently and collects their results in the order the awaitables were provided.
+It does not control the order in which the tasks execute. The event loop does that. `gather` coordinates multiple awaitables concurrently and collects their results in the order the awaitables were provided.
 
 Event loop -> Determines when each task gets to execute/resume.
 `gather()` -> collects the corresponding results then return them in order.
 
-If `gather()` has multiple tasks inside it and one failed it does not automatically cancel the rest.  
-Falling doesn't necessarily mean al the underlying tasks are cancelled.  
+If `gather()` has multiple tasks inside it and one fails, it does not automatically cancel the rest.  
+Failing doesn't necessarily mean all the underlying tasks are cancelled.  
 
 By default, `gather()` propagates the first exception it encounters to the caller, but it does not automatically cancel the other awaitables. The other operations may continue running.
 
@@ -839,8 +840,8 @@ CancelledError is raised inside the coroutine
 coroutine can terminate
 ```
 
-`task.cancel` is a cancellation request, not an immediate termination.  
-The task becomes cancelled only after the coroutine actually respond to the cancellation and finishes as cancelled.
+`task.cancel()` is a cancellation request, not an immediate termination.  
+The task becomes cancelled only after the coroutine actually responds to the cancellation and finishes in the cancelled state.
 
 > **Coroutine can handle the cancellation or terminate**
 
@@ -848,7 +849,7 @@ A coroutine can catch  `CancelledError`, perform cleanup, and potentially even s
 
 **`gather` with `cancel()`**  
 
-Suppose having a task that is a gathering of 2 async functions, cancelling the gathered task will cancel both of the functions as the `gather()` operation itself is being cancelled.
+Suppose we have a task that is a gathering of 2 async functions, cancelling the gathered task will cancel both of the functions as the `gather()` operation itself is being cancelled.
 
 ```text
 parent Task
@@ -860,7 +861,7 @@ parent Task
    └── B
 ```
 
-Suppose having 2 function `A()` and `B()` that they are gathered together
+Suppose we have two functions, `A()` and `B()`, that are gathered together.
 
 ```python
 results = await asyncio.gather(
@@ -870,7 +871,7 @@ results = await asyncio.gather(
 )
 ```
 
-If A raises `ValueError` and B succeeded, gather() not cancel B. It return `[ValueError(), 'B finished']`.
+If A raises `ValueError` and B succeeds, `gather()` does not cancel B. It returns `[ValueError(), 'B finished']`.
 
 ```text
 A fails
@@ -898,6 +899,41 @@ gather cancels its children
 A + B are cancelled
 ```
 
+### Structured concurrency with `asyncio.TaskGroup`
+
+Consider this pattern:
+
+```python
+async def main():
+    task_a = asyncio.create_task(work_a())
+    task_b = asyncio.create_task(work_b())
+
+    await asyncio.gather(task_a, task_b)
+```
+
+There is an architecture question, who owns the tasks, and who guarantees that they finish before their parent operation exits?
+
+With manually created tasks, we have to manage their lifecycle ourselves. We need to keep track of them, await them and coordinate their cancellation and failures.
+
+This where structures concurrency comes in.
+
+The idea of structured concurrency is:
+> Concurrent tasks should belongs to a defined scope, and that scope should manage their lifecycle.
+
+TaskGroup failure behavior: when a task raises an exception other than `CancelledError` the TaskGroup cancels its remaining child tasks. It then waits for those tasks to finish their cancellation and cleanup before propagating the failure.
+
+Using `finally` block executes as part of cancellation process; it does not erase or suppress the `CancelledError`.
+
+Why TaskGroup uses ExceptionGroup?  
+
+`ExceptionGroup` is not a single exception it is a container holding multiple exceptions.  
+When python raises an `ExceptionGroup`, the exception being raised is the group itself not an individual `ValueError` or `TypeError`.  
+
+- `except`: handles an exception.
+- `except*`: handles matching exception inside an exception group.
+
+
+
 ### Events
 
 `asyncio.Event()` is an object that lets one coroutine signal to other coroutines that something has happened. It is like a shared flag.
@@ -914,20 +950,20 @@ It has three important operations:
 
 **Frame:** an object representing an execution point in python code. It includes information such as the function being executed, its current line, and its local variables.
 
-`get_stack()` can help in async debugging by investigate where each task is suspended.  
+`get_stack()` can help in async debugging by investigating where each task is suspended.  
 
 **Limitation of stack:** `get_stack()` shows the task's python execution frames, not a complete explanation of why it is waiting. It won't tell you whether a network request is slow, an event will be sent, or a queue will never receive an item.
 
 **Remember:**
 
-- `task.get_stack()`returns a list of frame objects, not strings.
+- `task.get_stack()` returns a list of frame objects, not strings.
 - A task that has completed or been cancelled generally has no useful suspended stack to inspect.
 - `task.print_stack()` is related method that prints a formatted stack trace, which can be more convenient for debugging.
 - `get_stack()` is an inspection tool. It **does not** resume, pause, cancel or otherwise control the task.
 
 ### Timeouts
 
-`wait_for` function that is used for cancelling an async function after passing specific amount of time, If an operation hasn't completed in specific time, request its cancellation.
+`wait_for` function used to cancel an async function after a specific amount of time, If an operation hasn't completed in specific time, request its cancellation.
 
 Using a raise in the exception will cause TimeoutError.  
 
@@ -940,12 +976,12 @@ async def slow_operation():
         raise
 ```
 
-`raise` is used after the `except`. It re-throw the exception that is currently being handled.  
+`raise` is used after the `except`. It rethrows the exception that is currently being handled.  
 It is like: "Yes, I caught it, but I am not claiming that the cancellation didn't happen. Pass it upward."
 
 The cancellation is the mechanism used to stop the operation, while `TimeoutError` is what the caller sees as the reason the timeout wrapper failed.
 
-Without a raise in the exception it will cause CancellationError.
+Without `raise` in the exception handler, it will cause cancellation to be suppressed.
 
 ``` python
 async def slow_operation():
@@ -960,9 +996,9 @@ When `wait_for()` reaches its timeout, it cancels the awaited operation. Once th
 
 
 `wait_for()` is not receiving `CancelledError` and then deciding to "I will call this `TimeoutError`" in a simple exception-conversion sense.  
-Internally, it knows it initiated the cancellation because its timeout expired, and once the cancellation completes, teh timeout boundary is reported to the caller as `TimeoutError`.
+Internally, it knows it initiated the cancellation because its timeout expired, and once the cancellation completes, the timeout boundary is reported to the caller as `TimeoutError`.
 
-`asyncio.timeout()` and `asyncio.wait_for()` both enforce time limits. `wait_for()` applies teh timeout directly to an awaitable, while `timeout()` establish a timeout boundary around a block of code.
+`asyncio.timeout()` and `asyncio.wait_for()` both enforce time limits. `wait_for()` applies the timeout directly to an awaitable, while `timeout()` establishes a timeout boundary around a block of code.
 
 Instead of:
 
@@ -1058,7 +1094,7 @@ async def get_data():
 coro = get_data() # coro is coroutine object
 ```
 
-Coroutine object: represents the computation that eventually produces one result when awaited.
+A coroutine object represents the computation that eventually produces one result when awaited.
 
 **Async generator**  
 
@@ -1071,15 +1107,15 @@ async def numbers():
 result = numbers() # result is async generator object
 ```
 
-Async generator object: represents a computation that can produce multiple results overtime.
+An async generator object represents a computation that can produce multiple results over time.
 
 Key distinction: A coroutine is awaited to obtain its result; an async generator is iterated asynchronously to receive a sequence of values produced over time.
 
 **Async iterator**  
 
-`__aiter__()`: Returns the async iterator.
+`__aiter__()`: returns the async iterator.
 
-`__anext__()`: return the next value.
+`__anext__()`: returns the next value.
 
 ```python
 async for x in asynchronous(): # Async iterator where asynchronous() is async generator function
@@ -1103,15 +1139,15 @@ async for number in async_iterator_numbers():
 
 ```
 
-Using time delay in iterator with async generator will result in the generator stopping until the iterator's time delay is over, then the generator start to be resumed.  
+Using a time delay in an iterator with an async generator will result in the generator stopping until the iterator's time delay is over; then the generator starts to resume.  
 The async generator (the producer) is suspended because the consumer (`async for`) is currently waiting/sleeping, not because the iterator somehow blocks it.
 
-Async generator produces the next value only when the consumer request it. if the consumer suspends after receiving a value, the generator remains suspended until the consumer requests the next value.
+Async generator produces the next value only when the consumer requests it. if the consumer suspends after receiving a value, the generator remains suspended until the consumer requests the next value.
 
 **Backpressure**  
 
-in back pressure the producer work independently from the consumer, while the consumer is suspended the producer can continue running and produce outputs(data).  
-The outputs is stored in queue (`asyncio.Queue`).
+In backpressure, the producer works independently from the consumer. While the consumer is suspended, the producer can continue running and producing outputs (data).  
+The outputs are stored in queue (`asyncio.Queue`).
 
 The queue is a buffer between a fast producer and a slow consumer.
 
@@ -1119,22 +1155,22 @@ The queue is a buffer between a fast producer and a slow consumer.
 
 **Buffering** means temporarily storing produced data so the producer and consumer do not need to operate at exactly the same time.
 
-**Backpressure** mechanism happens when the buffer reaches its limit and the producer forced to slow down or wait because the consumer cannot keep up.
+**Backpressure** mechanism happens when the buffer reaches its limit and the producer is forced to slow down or wait because the consumer cannot keep up.
 
-Suppose the producer generates 1000 times per seconds, but the consumer can produce only 10 per second, we will find a problem which is the maximum capacity of the queue, and eventually the producer fills it.
+Suppose the producer generates 1,000 items per second, but the consumer can process only 10 per second. We will eventually encounter a problem with the maximum capacity of the queue, and the producer will fill it.
 
-When the queue is full the producer waits until the consumer removes something so it can have some free space, and this called **backpressure**.
+When the queue is full the producer waits until the consumer removes something so it can have some free space, and this is called **backpressure**.
 
 **Backpressure:** The slow consumer effectively pushes pressure backward toward the producer, preventing the producer from endlessly creating data and consuming unlimited memory.
 
 Backpressure is what happens when a producer is forced to slow down because the consumer can't keep up.
 
-When the queue gets full the producer itself become suspended while the consumer continues running, after the consumer get the data, space becomes available in the queue allowing producer to resume.  
+When the queue gets full, the producer itself becomes suspended while the consumer continues running. After the consumer gets the data, space becomes available in the queue, allowing the producer to resume.  
 `asyncio.Queue` is FIFO by default, so `get()` takes the oldest item first. `get()` is the queue's consumption operation, so it removes and returns the oldest item.
 
 Suspending one task does not suspend the event loop. The producer can be suspended while the consumer runs, then the consumer can be suspended while the producer runs, the event loop coordinates both.
 
-We can deal with slow consumer by using backpressure, so producer waits temporarily and consumer eventually progress.  
+We can deal with a slow consumer by using backpressure, so the producer waits temporarily and the consumer eventually makes progress.  
 For stuck consumer the producer may wait forever and the consumer never progresses, so we can use timeouts and cancellation
 
 The queue is useful when:
@@ -1147,10 +1183,10 @@ The queue is useful when:
 `asyncio.Queue` maintains an internal counter called the number of unfinished tasks.
 
 - Every successful `queue.put(item)` increments the counter.
-- Every corresponding `queue.task(done)` decrements it.
+- Every corresponding `queue.task_done()` decrements it.
 - `queue.join()`: Suspends the calling coroutine until the counter reaches zero.
 
-`queue.get()` removes an item from its awaiting items, But the unfinished tasks counter does not decrease why?  
+`queue.get()` removes an item from its waiting items, But the unfinished tasks counter does not decrease why?  
 Because retrieving a document does not mean it is completed.
 
 - `queue.get()`: Removes an item from the queue.
@@ -1187,7 +1223,7 @@ file.close()
 If `process(data)` raises an exception, execution jumps out of that normal sequence. normal sequence. The `file.close` line may never execute.  
 So we acquired the resource but we potentially never released.
 
-The same pattern appears every where in programming:
+The same pattern appears everywhere in programming:
 
 ```text
 open file -> close file
@@ -1197,12 +1233,12 @@ open network -> close connection
 allocate temp resource -> clean it up
 ```
 
-Here is  why `with` exists.
+Here is why `with` exists.
 
-iIt acquire resource -> use it -> cleanup.  
-The important part is that cleanup belongs to the lifecycle of the resource rather than being something manually you remember to do at the end.  
+It acquires resource -> use it -> cleanup.  
+The important part is that cleanup belongs to the lifecycle of the resource rather than being something you manually remember to do at the end.  
 
-`with` does'nt mean "close the resource". It guarantees that the context manager's exit behavior is invoked.  
+`with` doesn't mean "close the resource". It guarantees that the context manager's exit behavior is invoked.  
 So, it:
 
 - Prevents the caller from having to manually remember the cleanup step.
@@ -1226,7 +1262,7 @@ Eventually you can run into limits on how many files/resources your process is a
 
 The files are not the only example, this can happen with database connection, where leaving a connection open unnecessarily can consume connection-pool/server capacity.  
 
-Other case is lock:
+Another case is a lock:
 
 ```python
 lock.acquire()
@@ -1236,9 +1272,9 @@ lock.acquire()
 # lock.release() never happens
 ```
 
-In this case the lock will never got released so another task/thread might wait indefinitely for that lock.
+In this case the lock will never get released so another task/thread might wait indefinitely for that lock.
 
-**Lock:** it is a synchronization mechanism used when multiple concurrent pieces of code need to access something shared. The lock provides a way of allowing one piece of code to access shared thing.
+**Lock:** it is a synchronization mechanism used when multiple concurrent pieces of code need to access something shared. The lock provides a way of allowing one piece of code to access a shared resource.
 
 **Example**: 2 tasks (A,B) accessing the same shared variable `balance = 100` task A: withdraw 80, task B: withdraw 50. Without some coordination both could observe `balance = 100` and before either one updates it they both read it in the same time resulting in a wrong final value calculation:
 
@@ -1253,10 +1289,10 @@ Task A: writes → 20
 Task B: writes → 50
 ```
 
-The final value becomes 50, even both withdrawals together were 130.  
+The final value becomes 50, even though both withdrawals together totaled 130.  
 The concurrency problem caused by multiple operations interacting with shared state.
 
-With lock: task B waits until task A finish using hte shared resources then release the lock:
+With a lock, task B waits until task A finishes using the shared resource and releases the lock:
 
 ```text
              Lock
@@ -1272,7 +1308,7 @@ Task B → waits ─────────────────────
 **What actually makes an object work with `with`?**  
 
 `with` manages a resource's lifecycle: enter/setup → use → exit/cleanup.  
-python needs a way to know what "enter" and "exit" mean for a particular object.  
+Python needs a way to know what "enter" and "exit" mean for a particular object.  
 That's where `__enter__()` and `__exit__()` come in.
 
 Suppose `with resource: ---` the resource lifecycle:
@@ -1303,7 +1339,7 @@ Suppose `with resource: ---` the resource lifecycle:
 - Rollback/commit transaction.
 - Close connection.
 
-**Tiny custom context manger**  
+**Tiny custom context manager**  
 
 ```python
 class Resource:
@@ -1334,7 +1370,7 @@ ValueError: Something went wrong
 Notice that "Enter", "INSIDE", "EXIT" got printed before the ValueError.  
 Also the error Continue outside the `with` block and "After" wasn't printed.  
 
-The three arguments of `__exit__` becomes important in the error cases:
+The three arguments of `__exit__` become important in error cases:
 
 ``` python
 def __exit__(self, exc_type, exc_value, traceback):
@@ -1354,8 +1390,8 @@ The `exc_value` is the actual exception object, not just the "Something went wro
 
 A traceback is the execution history that tells python where the exception came from.
 
-Without the 3 args "EXIT"  will not be printed and we receive TypeError in addition to the Value error, why?  
-Because `__exit__()` is the method responsible for the exit part of teh context manager protocol (when we use `with`). But python can only invoke the method if the method has the required signature.
+Without the three arguments, "EXIT" will not be printed, and we receive a TypeError in addition to the ValueError. Why?  
+Because `__exit__()` is the method responsible for the exit part of the context manager protocol (when we use `with`). But Python can only invoke the method if the method has the required signature.
 
 So in case of:
 
@@ -1363,7 +1399,7 @@ So in case of:
 def __exit__(self):
 ```
 
-When error happens the python called it like:
+When an error happens, Python calls it like this:
 
 ```python
 resource.__exit__(exc_type, exc_value, traceback)
@@ -1377,7 +1413,7 @@ TypeError:
 Resource.__exit__() takes 1 positional argument but 4 were given
 ```
 
-Thats why `"EXIT"` never printed.
+That's why `"EXIT"` never printed.
 
 The sequence:
 
@@ -1395,7 +1431,7 @@ __exit__ has the wrong signature
 TypeError occurs while trying to call __exit__
 ```
 
-If nothing goes wrong, `__exit_()` is still called. but if there is an error (like `raise ValueError(`error`)`) `__exit_()` is also called, but python gives it information about the exception:
+If nothing goes wrong, `__exit__()` is still called. But if there is an error (like `raise ValueError(`error`)`) `__exit_()` is also called, but python gives it information about the exception:
 
 `exc_type` = None
 `exc_value` = None
@@ -1485,7 +1521,7 @@ with Connection() as conn:
 `conn` is a variable(name) that refers to whatever object `__enter__()` returns.  
 Because `__enter__()` returns `self` in this example, `conn` refers to the same `Connection` object created by `Connection()`
 
-`return self` means return this particular `Connection` object, and `conn` refers to that object, which mean that `conn` is a name/variable that points to an object in memory.
+`return self` means return this particular `Connection` object, and `conn` refers to that object, which means that `conn` is a name/variable that points to an object in memory.
 
 > An object is the actual thing in memory; a variable/name is a way to refer to that object. `return self` returns the current object so `conn` receive a reference to that same object.
 
@@ -1535,7 +1571,7 @@ execution continues after the with block
 print("AFTER")
 ```
 
-`__exit__()` didn't magically make the exception disappear. it made a decision about what python should do with the exception by returning `True`.
+`__exit__()` didn't magically make the exception disappear. it makes a decision about what python should do with the exception by returning `True`.
 
 **The complete context manager-mental model:**
 
@@ -1566,16 +1602,16 @@ exception   exception
 
 ### Async context managers
 
-The life cycle of context mangers includes getting the resource at the start and close it at the end. The question is why ordinary `__enter__()` and `__exit__()` are not enough?  
-The process of getting the resource and closing it may have a waiting time depends on the resource itself. Suppose an HTTP client needs to establish or clean up network-related state, this time can be used to execute other ready tasks.
+The lifecycle of context managers includes getting the resource at the start and closing it at the end. The question is why ordinary `__enter__()` and `__exit__()` are not enough?  
+The process of getting the resource and closing it may involve waiting, depending on the resource itself. Suppose an HTTP client needs to establish or clean up network-related state, this time can be used to execute other ready tasks.
 
-for the ordinary `with`, python uses:  
+For the ordinary `with`, Python uses:  
 `__enter__()` for entering/setup the resource , and for exiting/close the resource `__exit__(...)`.
 
 An ordinary context manager `__enter__()` and `__exit__()` can't use `await` because those are normal functions.  
-As async context manager `async def __aenter__()` and `async def __aexit__()`.
+An async context manager `async def __aenter__()` and `async def __aexit__()`.
 
-In the `async with`, python uses:  
+In `async with`, Python uses:  
 `await __aenter__()` for entering/setup the resource asynchronously, and for exiting/close the resource asynchronously`await __aexit__(...)`.
 
 ```python
@@ -1588,7 +1624,7 @@ async def __aenter__(self):
 For this code, during the 2 seconds of sleeping the event loop suspends the current task then go for execute ready tasks.  
 The suspension happens at the `await` inside `__aenter__()` not because `async with` itself magically pauses.
 
-`async` does not mean `__aenter__()` must suspended, if the awaited operation is already immediately complete, there may no meaningful scheduling opportunity.
+`async` does not mean `__aenter__()` must suspended, if the awaited operation is already immediately complete, there may be no meaningful scheduling opportunity.
 
 ```text
 ordinary context manager
@@ -1621,7 +1657,7 @@ class Resource:
 Because `with` and `async with` are two different protocols.  
 Ordinary `with resource:` expects the synchronous context-manager protocol `resource.__enter__()`,`resource.exit()`.  
 
-While `async with resource:` expects teh asynchronous context-manager protocol: `await resource.__aenter__()`, `await resource.__aexit__(...)`. The distinction matters because python needs to know whether entering/leaving the resource can involve asynchronous suspension.  
+While `async with resource:` expects the asynchronous context-manager protocol: `await resource.__aenter__()`, `await resource.__aexit__(...)`. The distinction matters because Python needs to know whether entering/leaving the resource can involve asynchronous suspension.  
 
 In ordinary `with`:  
 `with resource:`  
@@ -1655,7 +1691,7 @@ finished
 body starts
 ```
 
-The same distinction with applies when leaving:
+The same distinction applies when leaving:
 
 ```text
 with
@@ -1753,7 +1789,7 @@ So there is two different kinds of async behavior:
 
 `await client.get(...)`: performs an asynchronous operation using that resource.  
 
-`async with` does not makes everything inside the block asynchronous, for example:
+`async with` does not make everything inside the block asynchronous, for example:
 
 ```python
 async with client:
@@ -1762,8 +1798,8 @@ async with client:
 
 The `async with` only affects the lifecycle of `client`. It does not change the nature of `expensive_cpu_calculation()`
 
-when it is time for this task to be executed, it will take long time and we cant stop it to start a new ready task.  
-Thats because it is just an operation that require a lot of CPU computation time (CPU bonded operation).  
+when it is time for this task to be executed, it will take long time and we can't stop it to start a new ready task.  
+That's because it is just an operation that require a lot of CPU computation time (CPU-bound operation).  
 
 It is not simply i/o bound so we can hold it till we got the respond from external source (like getting database values).
 
@@ -1779,7 +1815,7 @@ Here, the `await` on `client.get()` allows the current task to suspend while the
 However, the `await` makes the suspension possible but it does not guarantee that a scheduling switch actually occurs.  
 If the awaited operation is already complete, the coroutine may continue without meaningfully giving another task a chance to run
 
-The principle that the two example are illustrate is: `async with` does not transform the code inside the block into asynchronous code.  
+The principle that the two examples illustrate is: `async with` does not transform the code inside the block into asynchronous code.  
 The code inside the block is still synchronous unless that code itself performs asynchronous operations, such as `await`.
 
 **Example**
@@ -1806,19 +1842,19 @@ async def main():
 
 ```
 
-There is 3 separate suspension periods:
+There are three separate suspension periods:
 
 1. `__aenter__()`: `await asyncio.sleep(2)`.
 2. The body: `await asyncio.sleep(3)`
 3. `__aexit__()`: `await asyncio.sleep(2)`
 
-This gives us clear distinction:
+This gives us a clear distinction:
 
 1. Resource acquisition (`__aenter__()`): may suspend.
 2. Resource usage (body): may suspend.
 3. Resource cleanup `__aexit__()`: may suspend.
 
-`async with` does not create these suspension points by itself, the suspension happens because the as ync context-manager methods and the body contain awaitable operations.
+`async with` does not create these suspension points by itself, the suspension happens because the async context-manager methods and the body contain awaitable operations.
 
 Imagine as async HTTP client with this lifecycle:
 
@@ -1828,7 +1864,7 @@ async with client:
     data = await response.json()
 ```
 
-There are tree different asynchronous operations:
+There are three different asynchronous operations:
 
 1. `__aenter__()`: establish/prepare the client resource
 2. `client.get(...)`: perform network I/O
@@ -1838,15 +1874,15 @@ And then `__aexit__()`: clean up the client resource.
 
 All four can potentially contain suspension points, but they serve different purposes.
 
-The operations are asynchronous but all of them depend each other, so we can't work concurrently within the same block.  
+The operations are asynchronous but all of them depend on each other, so we can't work concurrently within the same block.  
 
 We can't start `client.get()` before the client has been successfully acquired, and you can't start `response.json()` before you have the response.
 
-The operations within this particular workflow are sequential/dependent, but the task execute concurrently with other tasks whenever it reaches an actual suspension point.
+The operations within this particular workflow are sequential/dependent, but the task executes concurrently with other tasks whenever it reaches an actual suspension point.
 
 **Client with cpu bound function**  
 
-Suppose the client have function:
+Suppose the client has a function:
 
 ```python
 async with client:
@@ -1855,7 +1891,7 @@ async with client:
 
 Where `calculate_something()` is an ordinary CPU-bound synchronous function.  
 The `async with` will not make `calculate_something()` asynchronous, as `calculate_something()` is ordinary synchronous CPU-bound code.  
-The execution of the function consume CPU computation, the event loop can't take control away from the task simply because the calculation is taking a long time.
+The execution of the function consumes CPU computation, the event loop can't take control away from the task simply because the calculation is taking a long time.
 
 ### Async streaming
 
@@ -1882,7 +1918,7 @@ async for chunk in stream_data():
 ```
 
 What happens is when the consumer receives the first `chunk`,  the resource was acquired, the stream produced the first `chunk`, **and the resource is still held** because the stream is still active.  
-Thats because the resource is still needed after receiving the first `chunk`.  
+That's because the resource is still needed after receiving the first `chunk`.  
 
 When the stream is waiting for the next chunk the task can suspend:
 
@@ -1911,9 +1947,9 @@ So we have two different things happening simultaneously at the concept level:
 
 And the task may repeatedly suspend while waiting for more data.  
 
-The resource stays open while its owning context is active (in our example it is the task that uses it is suspended). It closes when execution exits that context and cleanup runs.  
+The resource stays open while its owning context is active (in our example, the task that uses it is suspended). It closes when execution exits that context and cleanup runs.  
 Task suspension does not mean resource suspension or resource closer.  
-The resource is released/closed when the stream/lifecycle is finished, which may involve detecting end-of-stream and performing cleanup.
+The resource is released/closed when the stream/lifecycle finishes, which may involve detecting end-of-stream and performing cleanup.
 
 Suppose:  
 
@@ -1984,9 +2020,9 @@ processes A
 
 The producer doesn't necessarily have to stop immediately, and the consumer doesn't have to process everything at the exact moment it is produced.
 
-When the buffer reaches its limit, backpressure prevent unlimited accumulation by making the producer slow down or wait.  
+When the buffer reaches its limit, backpressure prevents unlimited accumulation by making the producer slow down or wait.  
 
-When the suspension due to the backpressure is happen the resource stays open.
+When the suspension due to the backpressure happens the resource stays open.
 
 > Suspension doesn't necessarily mean the resource is closed.
 
@@ -2008,8 +2044,8 @@ An unbounded buffer keeps growing if production persistently exceeds consumption
 
 If the buffer is bounded, eventually it becomes full, and backpressure forces the producer to wait. So buffering solves a temporary rate mismatch, not permanent one.  
 
-Suppose we are monitoring a temperature sensor that produce 10 readings per seconds, but our consumer process only 2 reading per second.  
-Since the goal is to know the current temperature, rather than preserve even historical reading. This called dropping data.  
+Suppose we are monitoring a temperature sensor that produces 10 readings per second, but our consumer process only 2 readings per second.  
+Since the goal is to know the current temperature, rather than preserve even historical reading. This is called dropping data.  
 
 **For example** if the sensor produces readings `20`,`21`,`23`,`24` while the consumer is busy, keeping `24` and discarding the older readings may be sufficient. This is often called a **latest-value strategy**.
 
@@ -2065,7 +2101,7 @@ await consumer
 ```
 
 Since the producer gets stuck, `main` never reaches `await consumer`. THe consumer's exception is not automatically propagated to `main()` just because the task failed.  
-The `async` with block doesn't exit, and `FakeResource.__aexit__()` isn't called.
+The `async with` block doesn't exit, and `FakeResource.__aexit__()` isn't called.
 
 Suppose the consumer fails, and we detect its exception, and we want to:
 
@@ -2074,7 +2110,7 @@ Suppose the consumer fails, and we detect its exception, and we want to:
 3. Exit the `async with` block so `FakeResource.__aexit__()` runs.
 
 If we call `producer.cancel()` it request cancellation; it doesn't immediately terminate the task.  
-When producer reaches a cancellation point, such as an `await` that allows cancellation to be delivered, `asyncio.CancelledError` can be raised inside the producer coroutine.
+When the producer reaches a cancellation point, such as an `await` that allows cancellation to be delivered, `asyncio.CancelledError` can be raised inside the producer coroutine.
 
 When running:  
 
@@ -2108,7 +2144,7 @@ In example 4 using `asyncio.wait` to solve example 3 in notes:
 - `done`: a set of task that have finished, whether successfully or with an exception.
 - `pending`: a set of task that haven't finished yet.
 
-In our example, the consumer raises `TypeError`, so the consumer Task finishes with an exception, The producer is still running or stuck waiting for the queue space.
+In our example, the consumer raises `TypeError`, so the consumer Task finishes with an exception, The producer is still running or stuck waiting for queue space.
 
 Therefore, `asyncio.wait()` returns:
 
@@ -2128,7 +2164,7 @@ Suppose `resource.stream()` raises an `OSError` while reading chunk `2`.
     )
 ```
 
-If the producer fails first, it will be in `done`, and the consumer will likely be in pending. We are going to use the same technique used with the failed consumer.
+If the producer fails first, it will be in `done`, and the consumer will likely be in `pending`. We are going to use the same technique used with the failed consumer.
 
 ```python
         # Handle producer failure
@@ -2143,8 +2179,8 @@ If the producer fails first, it will be in `done`, and the consumer will likely 
 
 ```
 
-When the producer is failed it will be stored in `done` but it will have an exception so `producer.exception()` will have value.  
-In `task.exception()` if the task the completed successfully, `task.exception()` returns `None` so the condition will be false. If the task raised an exception, `task.exception()` returns exception so the condition is True
+When the producer fails, it will be stored in `done` but it will have an exception so `producer.exception()` will have value.  
+In `task.exception()` if the task completed successfully, `task.exception()` returns `None` so the condition will be false. If the task raised an exception, `task.exception()` returns exception so the condition is True
 
 To handle more edge cases we should make sure that the consumer is not finished before the producer so its cancellation will not be meaning less, so we are going to check if the consumer is still not finished or not by checking `consumer in pending`
 
@@ -2168,10 +2204,10 @@ async for chunk in stream():
     await process(chunk)
 ```
 
-The consumer controls the pace of iteration. It request a chunk, receives it, process it, and then requests the next one.  
-If `process(chunk)` takes two seconds, the generator doesn't independently continue producing chunks in hte background. It resumes when the consumer requests the next item.  
+The consumer controls the pace of iteration. It requests a chunk, receives it, processes it, and then requests the next one.  
+If `process(chunk)` takes two seconds, the generator doesn't independently continue producing chunks in the background. It resumes when the consumer requests the next item.  
 
-This **pull-based streaming**: the consumer puls data from the source.
+This is **pull-based streaming**: the consumer pulls data from the source.
 
 2- **Push-based streaming**
 
@@ -2187,11 +2223,11 @@ These terms describe how data is delivered, not whether the code uses `async` an
 
 **Example**: suppose an external service push 100 events per second, while the consumer can only process 20 per second  and the service cannot be slowed down.  
 
-If the source cannot slow down and hte consumer is permanently slower; the system has a fundamental throughput mismatch.  
+If the source cannot slow down and the consumer is permanently slower; the system has a fundamental throughput mismatch.  
 If the last few events are more important then we could use dropping data. A bounded queue with backpressure works only if the source can actually be slowed down or paused.  
 If every event must be preserved and the source cannot pause, alternatives include durable storage, a message broker, or scaling up the consumer capacity. These approaches still require sufficient storage or processing capacity; no buffering strategy can eliminate a permanent rate mismatch for free.
 
-**Durability**: means that the data is stored in a way that allows it to survive the relevant failures, such as an application crash or restart. That exact guarantees depend on how and where the data is stored.
+**Durability**: means that the data is stored in a way that allows it to survive the relevant failures, such as an application crash or restart. Those exact guarantees depend on how and where the data is stored.
 
 **Example**, instead of keeping and important event only in RAM, an application could save it to a file or a database on persistent storage. After restarting, it could read the saved event and continue processing it.
 
@@ -2202,7 +2238,7 @@ Note: saving an event does not automatically mean it has been processed. Storage
 In python, when a process terminates, its in-memory queue disappears. if those events weren't saved somewhere else, they can't be recovered from that queue after a restart.
 
 **Message broker**: an intermediary system that accepts messages from producers and makes them available to consumers.  
-It allows producers and consumers to operate more independently, the producer doesn't necessarily need to wait for the consumer to precess each message before sending the next one.
+It allows producers and consumers to operate more independently, the producer doesn't necessarily need to wait for the consumer to process each message before sending the next one.
 
 **Example**s of message brokers: RabbitMQ and Apache Kafka.
 
@@ -2308,7 +2344,7 @@ This is CPU-bound synchronous function that runs for three seconds without yield
 
 For CPU-heavy work, there are two common options:
 
-- **Treads**: Run the work in a separate thread so the event-loop thread can continue. This can help responsiveness, although python GIL can limit parallel execution of CPU-bound python code.
+- **Threads**: Run the work in a separate thread so the event-loop thread can continue. This can help responsiveness, although python GIL can limit parallel execution of CPU-bound python code.
 - **Processes**: Run the work in another process, allowing CPU-bound python code to execute in parallel on multiple CPU cores.
 
 So if we change that endpoint to:
@@ -2319,7 +2355,7 @@ async def endpoint():
     return result
 ```
 
-While the CPU-heavy function is executing in the worker thread, the event loop can run other tasks on its own thread, thats because both run on 2 independent threads.
+While the CPU-heavy function is executing in the worker thread, the event loop can run other tasks on its own thread, that's because both run on 2 independent threads.
 
 What happens:
 
@@ -2351,19 +2387,19 @@ After asyncio.create_task(save_result()), the new task is scheduled to run, but 
 Meanwhile, `main()` can finish immediately after printing `"Main: completed"`.
 
 **What happens when `main()` finishes?**  
-Calling `asyncio.create_task(save_result())` schedules a separate task. The task is owned by the event loop not owned by the life time of `main()` in the sense that it automatically finishes when `main()` finishes.  
+Calling `asyncio.create_task(save_result())` schedules a separate task. The task is owned by the event loop, not by the lifetime of `main()` in the sense that it automatically finishes when `main()` finishes.  
 
 In the Jupyter notebook:
 
-- After `main()` finishes `await main()` return the control to the event loop.  
-- The event loop continue to exist, so the background task may continue running.
-- If the event loop shuts down, pending tasks my be cancelled during shutdown.
+- After `main()` finishes, `await main()` returns control to the event loop.  
+- The event loop continues to exist, so the background task may continue running.
+- If the event loop shuts down, pending tasks may be cancelled during shutdown.
 
 Therefore, the task might finish successfully after `main()` returns or it might not. The exact outcome depends on what happens next in the environment.
 
 **Why is this risky in production?**  
 Because the code has no explicit guarantee that the operation completes or that its failure is observed.  
-If saving the result is essential, returning a successful response before the save completes could have application reporting success when the data was never persisted.
+If saving the result is essential, returning a successful response before the save completes could have the application report success when the data was never persisted.
 
 **In Example 2: Fire-and-Forget **Task**:  
 
@@ -2412,7 +2448,7 @@ Also if `save_result()` raises an exception, `await task` propagates that except
 
 #### Losing track of a task's exceptions
 
-Suppose a background operation fails, but nobady awaits its task or retrieves its exception, Python's asyncio may eventually report a warning such as `Task exception was never retrieved`.
+Suppose a background operation fails, but nobody awaits its task or retrieves its exception, Python's asyncio may eventually report a warning such as `Task exception was never retrieved`.
 
 In **Example 1: task fails in the **background**:  
 
@@ -2426,7 +2462,7 @@ async def main():
     print("Main completed")
 ```
 
-The `ValueError` won't automatically propagate out of `await main()` since `main()` does not await that task or other wise retrieve its exception, the exception won't automatically propagate through `await main()`.
+The `ValueError` won't automatically propagate out of `await main()` since `main()` does not await that task or otherwise retrieve its exception, the exception won't automatically propagate through `await main()`.
 
 #### Retrieving exceptions without awaiting immediately
 
@@ -2476,14 +2512,14 @@ async def main():
 We added `await task` so if background task raises `ValueError`, the exception propagates through `await task`.  
 Unless we catch it, `main()` exist with that exception, and `Main continues` is never printed
 
-So `await` does 2 important things:
+So `await` does two important things:
 
 1. It suspends the current coroutine until the awaited operation completes, allowing the event loop to run other tasks.
 2. It delivers the awaited operation's result to the current coroutine, or propagates its exception into that coroutine.
 
-Awaiting task doesn't create the error or make the task fail. The task fails independently; awaiting makes that failure propagate into the awaiting coroutine.
+Awaiting a task doesn't create the error or make the task fail. The task fails independently; awaiting it makes that failure propagate into the awaiting coroutine.
 
-without awaiting, the failure remains in the background Task unless something else retrieves or handles it; with awaiting, the failure propagates to the caller
+Without awaiting, the failure remains in the background Task unless something else retrieves or handles it; with awaiting, the failure propagates to the caller
 
 In **Example 3: Checking Task Completion and Exception Availability**:  
 
@@ -2496,7 +2532,7 @@ async def main():
     print(task.exception()) 
 ```
 
-`asyncio.create_task()` schedules the coroutine; but it doesn't guarantee that the task executed.  
+`asyncio.create_task()` schedules the coroutine, but it doesn't guarantee that the task has executed.  
 Since `main()` hasn't yielded control to the event loop, `background_work()` hasn't had an opportunity to finish.
 
 At this point:
@@ -2575,7 +2611,7 @@ The distinction:
 `asyncio.gather()` propagates the first ordinary exception it encounters to the awaiting coroutine immediately by default.  
 It does not wait for all other awaitables to finish, and does not automatically cancel the remaining ones.  
 
-It is important to distinct between the behavior of `asyncio.gather()` when a child awaitable is cancelled and a child coroutine rasing an ordinary exception.
+It is important to distinguish between the behavior of `asyncio.gather()` when a child awaitable is cancelled and a child coroutine raising an ordinary exception.
 
 - Ordinary exception: `asyncio.gather()` propagates the first ordinary exception to its awaiter without automatically cancelling the other children.
 - Child cancellation: `gather()` propagates CancelledError to its awaiter without automatically cancelling the other children.
@@ -2612,12 +2648,12 @@ If `main()` is cancelled while awaiting `group`, the cancellation propagates to 
 
 ### Async debugging and failure diagnosis
 
-There is useful methods to inspect a task state:
+There are useful methods to inspect a task state:
 
-- `task.done()`: It tells whether the task has finished, regardless of outcome. Means tasks that has been cancelled or raised an error consider finished.
-- `task.exception()`: It tells us if the task raise an exception. If it returns `None` the task completed without an exception.
-- `task.result()`: It tells us the what value did the task return. It raises the stored exception if the task failed, and `asyncio.InvalidStateError` if the task has not finished.
-- `task.cancelled()`: It tells whether the task finished through cancellation.
+- `task.done()`: It tells whether the task has finished, regardless of outcome. This means tasks that have been cancelled or raised an error are considered finished.
+- `task.exception()`: It tells us whether the task raised an exception. If it returns `None` the task completed without an exception.
+- `task.result()`: It tells us what value the task returned. It raises the stored exception if the task failed, and `asyncio.InvalidStateError` if the task has not finished.
+- `task.cancelled()`: It tells us whether the task finished through cancellation.
 - `task.get_coro()`: It tells us the coroutine object associated with the task.
 - `task.get_stack()`: It tells the stack-frame information, it is useful for inspecting where a task is suspended.
 
@@ -2713,7 +2749,7 @@ Offloading work to an executor protects event-loop responsiveness even when the 
 - `asyncio.get_running_loop()` returns the event loop that is currently running in the thread from which you call it.
 - `run_in_executor()` submits synchronous work to the process pool without blocking the event loop.
 
-The time needed to finish the execution of the four tasks in parallel is nearly a quarter of the time needed to finish them sequentially. However, the speedup is NOT guaranteed to be exactly four times because CPUs don't guarantee perfect scaling. There are also additional costs:
+The time needed to finish the four tasks in parallel is nearly a quarter of the time needed to finish them sequentially. However, the speedup is NOT guaranteed to be exactly four times because CPUs don't guarantee perfect scaling. There are also additional costs:
 
 - Process creation and initialization.
 - Transferring arguments and results between processes.
@@ -2846,18 +2882,48 @@ A shared work queue is one way to implement dynamic scheduling.
 
 ### Reliability  and failure coordination
 
-**Document-level failure:** One document fails, but the worker catches the exception and continues processing other documents.
+There are two different levels of failure in a worker-based pipeline:
 
-**Worker-level failure:** The worker itself terminates unexpectedly. It can no longer process anything from the queue.
+- **Document-level failure:** One document fails, but the worker catches the exception and continues processing other documents.
+- **Worker-level failure:** The worker itself terminates unexpectedly. It can no longer process anything from the queue.
 
-Worker-level failure is more dangerous because the pipeline may continue running even through part of its workforce has disappeared.
+Worker-level failure is more dangerous because it reduces the number of available consumers, the producers may continue adding documents to the queue, but fewer workers are available to process them.  
+If enough workers fail, the pipeline may stop making progress.
 
-The cancellation of CPU-bound function does not stop executing. Cancelling the asyncio task doesn't guarantee that an already-running process-pool job is stopped.
+Cancelling a CPU-bound function does not stop its execution. Cancelling the asyncio task doesn't guarantee that an already-running process-pool job is stopped.
 
-Suppose `process_documents(7) takes 5 seconds, and we cancelled it after 1 seconds.  
+Suppose `process_documents(7) takes 5 seconds, and we cancelled it after 1 second.  
 The asyncio worker stops waiting, but the process continues executing the function because the cancel affects the asyncio worker not the process pool.
 
+**Executor job lifetime and cancellation**  
+
+When an asyncio worker submits CPU-bound work through `run_in_executor()`, the actual computation executes outside the worker  coroutine.  
+
+If the worker task is cancelled while awaiting the executor result, the coroutine can stop waiting for that result. However, this does not guarantee that the underlying process-pool job stops.
+
+If the job has already started executing, it continues running until completion and cancelling the asyncio task does not forcibly terminate the process executing the function.
+
 #### Graceful shutdown
+
+Graceful shutdown means stopping the pipeline in an orderly way while allowing existing work to finish.
+
+Graceful shutdown sequence:
+
+```text
+Stop producing new work
+        ↓
+Send one sentinel per worker
+        ↓
+Workers finish their current work
+        ↓
+Workers consume their sentinels and exit
+        ↓
+await queue.join()
+        ↓
+await asyncio.gather(*workers)
+        ↓
+Shut down the ProcessPoolExecutor
+```
 
 **Sentinel:** a special value placed into a queue to communicate a control signal rather than carry actual work.
 
@@ -2900,10 +2966,10 @@ async def worker(queue, pool):
 ```
 
 If the worker is cancelled while awaiting its CPU job, `finally` will be executed.  
-First, `CancelledError` is not an ordinary processing exception, so `except` does not catch it.
+First, `CancelledError` is not an ordinary processing exception, so `except Exception` does not catch it.
 
 Second why does `finally` execute?  
-Because `calling task.cancel()` request cancellation, python raises `cancelledError` when the coroutine reaches an opportunity to receive cancellation.
+Because calling `task.cancel()` requests cancellation, Python raises `CancelledError` when the coroutine reaches an opportunity to receive cancellation.
 
 If the resource require an asynchronously closed before the coroutine, the `finally` block is allowed to contain `await`
 
@@ -2926,11 +2992,13 @@ The cancellation may take place while the finally is still suspended. So it will
 
 `asyncio.shield()`: It prevents cancellation of the outer task from propagating to the inner awaitable, means it protects the inner operation but it does not make the outer coroutine waits for that operation to finish.
 
+`asyncio.CancelError` inherits directly form `BaseException`, not `Exception` this is why an ordinary `except Exception:` does not catch cancellation.
+
 #### Cleanup Task supervision
 
 Supervisor: component responsible for overseeing the execution and lifecycle of other components, usually tasks or workers.  
 
-Supervisor do 3 things:  
+A supervisor does three things:  
 
 - Monitoring the tasks it is responsible for
 - Failure detection and coordination
@@ -2952,12 +3020,12 @@ raise RuntimeError("Unexpected worker failure")
 
 The supervisor should detect the failure and apply the pipeline failure policy. 
 
-On the other hands if the supervisor executes `worker_task.cancel()` this is an intentional shutdown. The worker isn't necessarily malfunctioning.
+On the other hand if the supervisor executes `worker_task.cancel()` this is an intentional shutdown. The worker isn't necessarily malfunctioning.
 
 #### Final architecture review
 
 - Producer: downloads documents and puts them into `asyncio.Queue`.
-- Queue: Coordinates work  distribution and provides bounded buffering.
+- Queue: Coordinates work distribution and provides bounded buffering.
 - Workers: Retrieve documents and submit CPU-bound processing jobs through `run_in_executor()`.
 - Process pool: Executes CPU-bound function in separate processes.
 

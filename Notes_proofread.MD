@@ -2738,6 +2738,13 @@ When a bounded queue is full, `await queue.put(item)` suspends the producer coro
 
 **Remember:** Limiting active requests and limiting task creation are two separate concerns.
 
+`asyncio.Semaphore(1)`, when initialized with `1`, a Semaphore behaves similarly to a Lock; only one coroutine can enter the protected section at time.  
+
+The main difference:
+
+- `Lock`: exclusive access to shared resource.
+- `Semaphore`: controls how many coroutines can access a resource simultaneously.
+
 #### Concurrency limits and performance measurements
 
 Important performance metrics:

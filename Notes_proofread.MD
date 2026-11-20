@@ -23,6 +23,7 @@
     - [Context managers](#context-managers)
       - [Lifecycle of a `with` statement](#lifecycle-of-a-with-statement)
     - [Async context managers](#async-context-managers)
+      - [Synchronizing asyncio tasks with `asyncio.Lock`](#synchronizing-asyncio-tasks-with-asynciolock)
     - [Async Context Manager with a Network Resource](#async-context-manager-with-a-network-resource)
     - [Async streaming](#async-streaming)
     - [Common async mistake](#common-async-mistake)
@@ -1736,6 +1737,43 @@ awaitable lifecycle operations
 
 An async context manager doesn't necessarily have to perform I/O in both methods. `__aenter__()` and `__aexit__()` can be asynchronous even if a particular implementation happens to complete immediately.  
 The protocol simply allows those lifecycle operations to suspend.
+
+#### Synchronizing asyncio tasks with `asyncio.Lock`
+
+Suppose having two coroutines access the same shared variable:
+
+```python
+import asyncio
+
+counter = 0
+
+async def increment():
+    global counter
+
+    for _ in range(100_000):
+        counter += 1
+        await asyncio.sleep(0)
+
+async def main():
+    await asyncio.gather(
+        increment(),
+        increment()
+    )
+
+    print(counter)
+
+asyncio.run(main())
+```
+
+`asyncio` uses cooperative scheduling, but `await` allows another coroutine to run between operations.
+
+A lock allows us to protect a critical section so that only one coroutine at time can execute it.
+
+```python
+async with lock:
+```
+
+A coroutine acquires the lock before entering the critical section. Other coroutines attempting to acquire the same lock must wait until it released.
 
 ### Async Context Manager with a Network Resource
 

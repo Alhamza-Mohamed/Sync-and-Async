@@ -47,6 +47,7 @@
       - [Combining asynchronous I/O and CPU processing](#combining-asynchronous-io-and-cpu-processing)
       - [Completion-order processing with `asyncio.as_completed()`](#completion-order-processing-with-asyncioas_completed)
       - [Submitting work to an executor and awaiting its result](#submitting-work-to-an-executor-and-awaiting-its-result)
+      - [Running block synchronous functions with asyncio.to\_thread()](#running-block-synchronous-functions-with-asyncioto_thread)
       - [Dynamic scheduling and load balancing](#dynamic-scheduling-and-load-balancing)
       - [Bounded pipeline architecture](#bounded-pipeline-architecture)
     - [Reliability  and failure coordination](#reliability--and-failure-coordination)
@@ -2857,6 +2858,25 @@ The distinction is:
 
 - `await` suspends the current coroutine when the awaited operation isn't ready.
 - Blocking synchronous code prevents the event loop thread from executing other tasks.
+
+#### Running block synchronous functions with asyncio.to_thread()
+
+`asyncio.to_thread()`: runs the synchronous function in separate thread, allowing the event loop to continue running other coroutines.  
+It solves blocking synchronous functions problem.
+
+If you want `asyncio.to_thread()` to execute a function you pass it it to `asyncio.to_thread()` without putting parentheses after it (`()`).  
+You pass the function reference only:  
+
+```python
+asyncio.to_thread(blocking_task)
+```
+
+Notice that we pass the function itself, without parentheses.  
+If the function requires arguments, pass them separately:
+
+```python
+asyncio.to_thread(blocking_task, arg1, arg2)
+```
 
 #### Dynamic scheduling and load balancing
 
